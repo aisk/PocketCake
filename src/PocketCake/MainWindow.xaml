@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="PocketCake.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="PocketCake">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TitleBar
+            x:Name="AppTitleBar"
+            Title="PocketCake"
+            IsBackButtonVisible="False"
+            IsPaneToggleButtonVisible="True"
+            PaneToggleRequested="OnPaneToggleRequested">
+            <TitleBar.IconSource>
+                <ImageIconSource ImageSource="ms-appx:///Assets/app_icon.png" />
+            </TitleBar.IconSource>
+            <TitleBar.RightHeader>
+                <StackPanel Margin="0,0,8,0" Orientation="Horizontal" Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8" ToolTipService.ToolTip="Master volume">
+                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE767;" />
+                        <Slider
+                            Width="120"
+                            VerticalAlignment="Center"
+                            IsEnabled="{x:Bind Settings.CanEdit, Mode=OneWay}"
+                            Maximum="100"
+                            Minimum="0"
+                            Value="{x:Bind Settings.MasterVolume, Mode=TwoWay}" />
+                    </StackPanel>
+                    <Button x:Name="ConnectButton" VerticalAlignment="Center" Click="OnConnectClick">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon x:Name="ConnectGlyph" FontSize="14" Glyph="&#xE703;" />
+                            <TextBlock x:Name="ConnectText" Text="Connect" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </TitleBar.RightHeader>
+        </TitleBar>
+
+        <NavigationView
+            x:Name="Nav"
+            Grid.Row="1"
+            IsBackButtonVisible="Collapsed"
+            IsPaneToggleButtonVisible="False"
+            IsSettingsVisible="True"
+            PaneDisplayMode="LeftCompact"
+            SelectionChanged="OnNavSelectionChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Presets" Tag="presets">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8D6;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="IR &amp; NAM slots" Tag="slots">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8F1;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem x:Name="ConsoleItem" Content="Developer console" Tag="console" Visibility="Collapsed">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE756;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+        </NavigationView>
+
+        <Grid Grid.Row="2" Padding="16,6" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <ProgressRing
+                Width="14"
+                Height="14"
+                IsActive="{x:Bind State.IsLoading, Mode=OneWay}" />
+            <TextBlock
+                Grid.Column="1"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="{x:Bind State.Status, Mode=OneWay}"
+                TextTrimming="CharacterEllipsis" />
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="PocketCake.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:PocketCake.Views">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- A Fluent card, as used by the Windows Settings app. -->
+            <Style x:Key="CardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+                <Setter Property="Padding" Value="16" />
+            </Style>
+
+            <Style x:Key="SectionHeaderStyle" BasedOn="{StaticResource BodyStrongTextBlockStyle}" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,24,0,8" />
+            </Style>
+
+            <!-- The UI is English; don't let the toggle labels follow the OS language. -->
+            <Style BasedOn="{StaticResource DefaultToggleSwitchStyle}" TargetType="ToggleSwitch">
+                <Setter Property="OnContent" Value="On" />
+                <Setter Property="OffContent" Value="Off" />
+            </Style>
+
+            <Style TargetType="views:SettingsRow">
+                <Setter Property="Margin" Value="0,0,0,4" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="views:SettingsRow">
+                            <Border
+                                MinHeight="64"
+                                Padding="16,8"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource OverlayCornerRadius}">
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        x:Name="Icon"
+                                        Margin="4,0,0,0"
+                                        VerticalAlignment="Center"
+                                        FontSize="20"
+                                        Glyph="{TemplateBinding Glyph}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{TemplateBinding Header}" TextWrapping="Wrap" />
+                                        <TextBlock
+                                            x:Name="DescriptionText"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Text="{TemplateBinding Description}"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ContentPresenter Grid.Column="2" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

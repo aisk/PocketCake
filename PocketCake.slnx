@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PocketCake.Core/PocketCake.Core.csproj" />
+    <Project Path="src/PocketCake/PocketCake.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PocketCake.Core.Tests/PocketCake.Core.Tests.csproj" />
+  </Folder>
+</Solution>
