@@ -406,6 +406,64 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         return Detail();
     });
 
+    [McpServerTool(Name = "rename_preset", Destructive = true)]
+    [Description("Renames a stored User preset without touching its sound or the live edits. The user must approve in PocketCake.")]
+    public Task<PresetInfo> RenamePreset([Description("User preset label P01-P50")] string preset, [Description("Up to 10 ASCII characters")] string name) => OnUiExclusive(async () =>
+    {
+        RequireIdle();
+        var target = RequireUser(ParsePreset(preset));
+        name = name.Trim();
+
+        if (name.Length is 0 or > PresetCommandFrame.NameChars || name.Any(c => c is < ' ' or >= (char)0x7F))
+        {
+            throw new McpException("name must be 1-10 ASCII characters");
+        }
+
+        var info = Preset(target);
+        await ConfirmAsync("Rename preset?", $"An AI agent wants to rename {info.Label} \"{info.Name}\" to \"{name}\".", "Rename");
+
+        Check(await state.RenamePresetAsync(target, name));
+
+        return Preset(target);
+    });
+
+    [McpServerTool(Name = "copy_preset", Destructive = true)]
+    [Description("Copies a stored preset (User or Factory, name included) over a User preset. The user must approve in PocketCake.")]
+    public Task<PresetInfo> CopyPreset([Description("Source label, e.g. P03 or F12")] string source, [Description("Destination User preset P01-P50")] string destination) => OnUiExclusive(async () =>
+    {
+        RequireIdle();
+        var from = ParsePreset(source);
+        var to = RequireUser(ParsePreset(destination));
+
+        if (from == to)
+        {
+            throw new McpException("source and destination are the same preset");
+        }
+
+        var (src, dst) = (Preset(from), Preset(to));
+        await ConfirmAsync("Copy preset?",
+            $"An AI agent wants to copy {src.Label} \"{src.Name}\" over {dst.Label} \"{dst.Name}\".{DiscardNote(to)}", "Copy");
+
+        Check(await state.CopyPresetAsync(from, to));
+
+        return Preset(to);
+    });
+
+    [McpServerTool(Name = "reset_preset", Destructive = true)]
+    [Description("Restores a User preset to its factory content (P03 gets F03). The user must approve in PocketCake.")]
+    public Task<PresetInfo> ResetPreset([Description("User preset label P01-P50")] string preset) => OnUiExclusive(async () =>
+    {
+        RequireIdle();
+        var target = RequireUser(ParsePreset(preset));
+        var (info, factory) = (Preset(target), Preset(new PresetRef(PresetBank.Factory, target.Number)));
+        await ConfirmAsync("Reset preset?",
+            $"An AI agent wants to overwrite {info.Label} \"{info.Name}\" with factory preset {factory.Label} \"{factory.Name}\".{DiscardNote(target)}", "Reset");
+
+        Check(await state.ResetPresetAsync(target));
+
+        return Preset(target);
+    });
+
     [McpServerTool(Name = "export_preset", ReadOnly = true)]
     [Description("The live preset as PocketCake preset JSON (the format the app's Export button writes).")]
     public Task<string> ExportPreset() => OnUi(() =>
@@ -801,6 +859,13 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         PresetRef.All.FirstOrDefault(p => string.Equals(p.Label, label.Trim(), StringComparison.OrdinalIgnoreCase)) is { Number: > 0 } p
             ? p
             : throw new McpException("preset must be a label like P01-P50 or F01-F50");
+
+    private static PresetRef RequireUser(PresetRef p) =>
+        p.Bank == PresetBank.User ? p : throw new McpException("Factory presets are read-only; use a User preset P01-P50");
+
+    /// <summary>Writing into the playing preset reloads it, dropping unsaved edits.</summary>
+    private string DiscardNote(PresetRef target) =>
+        state.CurrentPreset == target && state.IsModified ? " It is the current preset, so its unsaved edits are discarded." : "";
 
     private int ParseModule(string module) =>
         state.Data!.Modules.IdToName.FirstOrDefault(e => string.Equals(e.Value, module.Trim(), StringComparison.OrdinalIgnoreCase)) is { Value: not null } e

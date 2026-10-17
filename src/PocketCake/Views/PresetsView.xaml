@@ -217,7 +217,12 @@
                 SelectionMode="Single">
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="vm:PresetItem">
-                        <StackPanel Padding="0,7" Orientation="Horizontal" Spacing="10">
+                        <StackPanel
+                            Padding="0,7"
+                            Background="Transparent"
+                            ContextRequested="OnPresetContextRequested"
+                            Orientation="Horizontal"
+                            Spacing="10">
                             <Border
                                 Width="38"
                                 Padding="0,1,0,2"

@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using PocketCake.Core.Model;
 using PocketCake.ViewModels;
@@ -82,6 +83,45 @@ public sealed partial class PresetsView : Page
 
         // The list selects on click; put it back on the preset actually loaded.
         PresetList.SelectedItem = ViewModel.SelectedPreset;
+    }
+
+    /// <summary>Right-click menu of stored-preset commands (each writes flash, behind its own dialog).</summary>
+    private void OnPresetContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        if (((FrameworkElement)sender).DataContext is not PresetItem { Preset: var preset } || !ViewModel.CanPickPreset)
+        {
+            return;
+        }
+
+        var isUser = preset.Bank == PresetBank.User;
+        var menu = new MenuFlyout();
+
+        MenuFlyoutItem Item(string text, string glyph, Func<PresetRef, Task> action, bool enabled = true)
+        {
+            var item = new MenuFlyoutItem { Text = text, Icon = new FontIcon { Glyph = glyph }, IsEnabled = enabled };
+            item.Click += async (_, _) => await action(preset);
+            menu.Items.Add(item);
+
+            return item;
+        }
+
+        Item("Rename…", "", Dialogs.RenamePresetAsync, isUser);
+        Item("Copy to…", "", Dialogs.CopyPresetAsync);
+        Item("Reset to factory…", "", Dialogs.ResetPresetAsync, isUser);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        Item("Export .prst file…", "", Dialogs.ExportPresetFileAsync);
+        Item("Load .prst file…", "", Dialogs.ImportPresetFileAsync, isUser);
+
+        if (args.TryGetPosition(sender, out var point))
+        {
+            menu.ShowAt(sender, point);
+        }
+        else
+        {
+            menu.ShowAt((FrameworkElement)sender);
+        }
+
+        args.Handled = true;
     }
 
     private async void OnConnectClick(object sender, RoutedEventArgs e) => await MainWindow.Instance.ConnectAsync();

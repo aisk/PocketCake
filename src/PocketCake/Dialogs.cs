@@ -392,4 +392,164 @@ public static class Dialogs
             ReportIfBusy(await (isClone ? State.ClearCloneSlotAsync(slot) : State.ClearIrSlotAsync(slot)));
         }
     }
+
+    // -------------------------------------------------------------------
+    // Stored presets (rename, copy, factory reset, .prst files)
+    // -------------------------------------------------------------------
+
+    private static string PresetTitle(PresetRef p)
+    {
+        var name = State.PresetLabelName(p);
+
+        return name.Length == 0 ? p.Label : $"{p.Label} \"{name}\"";
+    }
+
+    /// <summary>The warning for writes into the preset the pedal is playing, which reloads it.</summary>
+    private static string ReloadNote(PresetRef target) =>
+        State.CurrentPreset == target && State.IsModified ? " It is the current preset, so its unsaved edits are discarded." : "";
+
+    public static async Task RenamePresetAsync(PresetRef preset)
+    {
+        var box = new TextBox
+        {
+            Header = "Name",
+            MaxLength = PresetCommandFrame.NameChars,
+            Text = State.PresetLabelName(preset),
+            Width = 320,
+        };
+
+        var stack = new StackPanel { Spacing = 12 };
+        stack.Children.Add(box);
+        stack.Children.Add(Caption("Up to 10 ASCII characters. Only the name changes; the stored sound stays as it is."));
+
+        var dialog = Create(Root, $"Rename {preset.Label}", stack);
+        dialog.PrimaryButtonText = "Rename";
+        dialog.CloseButtonText = "Cancel";
+        box.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = box.Text.Trim().Length > 0;
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            ReportIfBusy(await State.RenamePresetAsync(preset, box.Text.Trim()));
+        }
+    }
+
+    public static async Task CopyPresetAsync(PresetRef source)
+    {
+        var state = State;
+        var targets = Enumerable.Range(1, 50).Select(n => new PresetRef(PresetBank.User, n)).Where(p => p != source).ToList();
+        var slot = new ComboBox
+        {
+            Header = "Copy into",
+            ItemsSource = targets.Select(p => $"{p.Label}  {state.PresetLabelName(p)}").ToList(),
+            SelectedIndex = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var note = Caption("");
+
+        void UpdateNote()
+        {
+            var target = targets[Math.Max(0, slot.SelectedIndex)];
+            note.Text = $"{PresetTitle(target)} is overwritten with {PresetTitle(source)}, name included.{ReloadNote(target)}";
+        }
+
+        slot.SelectionChanged += (_, _) => UpdateNote();
+        UpdateNote();
+
+        var stack = new StackPanel { Spacing = 12, Width = 340 };
+        stack.Children.Add(slot);
+        stack.Children.Add(note);
+
+        var dialog = Create(Root, $"Copy {source.Label}", stack);
+        dialog.PrimaryButtonText = "Copy";
+        dialog.CloseButtonText = "Cancel";
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            ReportIfBusy(await state.CopyPresetAsync(source, targets[slot.SelectedIndex]));
+        }
+    }
+
+    public static async Task ResetPresetAsync(PresetRef preset)
+    {
+        var factory = new PresetRef(PresetBank.Factory, preset.Number);
+
+        if (await ConfirmAsync(Root, $"Reset {preset.Label}?",
+                $"{PresetTitle(preset)} is overwritten with factory preset {PresetTitle(factory)}.{ReloadNote(preset)}", "Reset"))
+        {
+            ReportIfBusy(await State.ResetPresetAsync(preset));
+        }
+    }
+
+    public static async Task ExportPresetFileAsync(PresetRef preset)
+    {
+        if (await State.ExportPresetFileAsync(preset) is not { } file ||
+            await MainWindow.Instance.PickSaveFileAsync(Path.GetFileNameWithoutExtension(file.FileName), "Preset file", ".prst") is not { } path)
+        {
+            return;
+        }
+
+        try
+        {
+            await File.WriteAllBytesAsync(path, file.Bytes);
+            State.ReportStatus($"exported to {path}");
+        }
+        catch (Exception e)
+        {
+            State.ReportStatus($"export failed: {e.Message}");
+        }
+    }
+
+    /// <summary>Picks a .prst file (the official app's format) and writes it into User preset <paramref name="preset"/>.</summary>
+    public static async Task ImportPresetFileAsync(PresetRef preset)
+    {
+        var state = State;
+
+        if (state.IsLoading || await MainWindow.Instance.PickFileAsync(".prst") is not { } path)
+        {
+            return;
+        }
+
+        PresetFile file;
+
+        try
+        {
+            // Real files are a few KB; refuse anything absurd before reading it.
+            if (new FileInfo(path).Length > 256 * 1024)
+            {
+                throw new FormatException("not a preset file (too large)");
+            }
+
+            file = PresetFile.Parse(await File.ReadAllBytesAsync(path));
+        }
+        catch (Exception e)
+        {
+            await ShowErrorAsync("Couldn't read the file", $"{Path.GetFileName(path)}: {e.Message}");
+            return;
+        }
+
+        if (!await ConfirmAsync(Root, $"Load into {preset.Label}?",
+                $"{PresetTitle(preset)} is overwritten with \"{file.Name}\" from {Path.GetFileName(path)}.{ReloadNote(preset)}", "Load"))
+        {
+            return;
+        }
+
+        var close = ShowProgress($"Loading into {preset.Label}");
+        OpResult result;
+
+        try
+        {
+            result = await state.ImportPresetFileAsync(preset, file);
+        }
+        finally
+        {
+            close();
+        }
+
+        ReportIfBusy(result);
+
+        if (result.Outcome == OpOutcome.Failed)
+        {
+            await ShowErrorAsync("Loading failed", result.Message ?? "unknown error");
+        }
+    }
 }
