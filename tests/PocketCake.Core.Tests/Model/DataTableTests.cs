@@ -1,4 +1,5 @@
 using PocketCake.Core.Model;
+using PocketCake.Core.Protocol;
 
 namespace PocketCake.Core.Tests.Model;
 
@@ -75,6 +76,27 @@ public sealed class CommandLibraryTests
         Assert.NotNull(Cmd.ParameterCommand(5, 0, "-50"));
         Assert.Null(Cmd.ParameterCommand(99, 99, "99"));
         Assert.Null(Cmd.ParameterCommand(0, 0, "0.5"));
+    }
+
+    [Fact]
+    public void ParameterCommandsCarryValidChecksums()
+    {
+        foreach (var (moduleId, algs) in Cmd.Parameters)
+        {
+            foreach (var (algId, values) in algs)
+            {
+                foreach (var (value, frame) in values)
+                {
+                    // 8080 F0 <crc> <body…> F7, every logical byte as a nibble pair.
+                    var nibbles = frame[6..^2];
+                    var bytes = Enumerable.Range(0, nibbles.Length / 4)
+                        .Select(i => (Hex.Byte(nibbles, i * 4) << 4) | Hex.Byte(nibbles, i * 4 + 2))
+                        .ToList();
+
+                    Assert.True(bytes[0] == Crc8Smbus.OfBytes(bytes.Skip(1)), $"module {moduleId} alg {algId} value {value}");
+                }
+            }
+        }
     }
 
     [Fact]
