@@ -1,4 +1,5 @@
 using System.Text.Json;
+using PocketCake.Core.Protocol;
 
 namespace PocketCake.Core.Model;
 
@@ -112,6 +113,32 @@ public sealed class CommandLibrary
 
     public List<int> EffectIdsFor(int moduleId) =>
         EffectTypes.TryGetValue(moduleId, out var m) ? m.Keys.Order().ToList() : [];
+
+    private Dictionary<(int Module, int Algorithm), int>? _effectByAlgorithm;
+
+    /// <summary>
+    /// The effect id whose select frame (<c>11 47 module slot algorithm</c>) writes <paramref name="algorithmId"/>
+    /// into <paramref name="moduleId"/>: the reverse of what a preset dump stores per slot.
+    /// </summary>
+    public int? EffectIdOf(int moduleId, int algorithmId)
+    {
+        if (_effectByAlgorithm is null)
+        {
+            var map = new Dictionary<(int, int), int>();
+
+            foreach (var (module, effects) in EffectTypes)
+            {
+                foreach (var (effectId, frame) in effects.OrderBy(e => e.Key))
+                {
+                    map.TryAdd((module, BitConverter.ToInt32(Hex.Logical(frame), 14)), effectId);
+                }
+            }
+
+            _effectByAlgorithm = map;
+        }
+
+        return _effectByAlgorithm.TryGetValue((moduleId, algorithmId), out var id) ? id : null;
+    }
 
     public string? ParameterCommand(int moduleId, int algId, string value) =>
         Parameters.TryGetValue(moduleId, out var a) && a.TryGetValue(algId, out var v) ? v.GetValueOrDefault(value) : null;
@@ -231,65 +258,6 @@ public sealed class CharacterMap
 
     public static CharacterMap FromJson(JsonElement json) =>
         new(json.EnumerateObject().ToDictionary(e => e.Name, e => e.Value.ValueKind == JsonValueKind.Null ? null : e.Value.GetString()));
-}
-
-/// <summary>Per-module effect signature layout + signature→fxId lookup.</summary>
-public sealed record ModuleSignatures(int Offset, int Length, IReadOnlyDictionary<string, int> SignatureToFxId);
-
-public sealed class EffectSignatures(IReadOnlyDictionary<int, ModuleSignatures> byModule)
-{
-    public IReadOnlyDictionary<int, ModuleSignatures> ByModule { get; } = byModule;
-
-    public static EffectSignatures Build(JsonElement json, EffectLibrary effects)
-    {
-        var nameToId = new Dictionary<string, int>();
-
-        foreach (var e in effects.Effects.Values)
-        {
-            nameToId[e.Name] = e.Id;
-        }
-
-        var byModule = new Dictionary<int, ModuleSignatures>();
-
-        foreach (var m in json.EnumerateObject())
-        {
-            var map = new Dictionary<string, int>();
-
-            foreach (var s in m.Value.GetProperty("signatures").EnumerateObject())
-            {
-                if (nameToId.TryGetValue(s.Value.GetString()!, out var id))
-                {
-                    map[s.Name.ToUpperInvariant()] = id;
-                }
-            }
-
-            byModule[int.Parse(m.Name)] = new ModuleSignatures(
-                m.Value.GetProperty("offset").GetInt32(),
-                m.Value.GetProperty("length").GetInt32(),
-                map);
-        }
-
-        return new EffectSignatures(byModule);
-    }
-}
-
-/// <summary>
-/// Parameter-value decode tables: where each param's value block lives, and the reverse map
-/// from a 6-byte value block to its decimal value.
-/// </summary>
-public sealed class ParameterTables(
-    IReadOnlyDictionary<string, (int Packet, int Offset)> locations,
-    IReadOnlyDictionary<string, double> valueLookup)
-{
-    /// <summary>"moduleId_algId" -> packet/offset.</summary>
-    public IReadOnlyDictionary<string, (int Packet, int Offset)> Locations { get; } = locations;
-
-    /// <summary>UPPERCASE 12-hex block -> value.</summary>
-    public IReadOnlyDictionary<string, double> ValueLookup { get; } = valueLookup;
-
-    public static ParameterTables FromJson(JsonElement loc, JsonElement val) => new(
-        loc.EnumerateObject().ToDictionary(e => e.Name, e => (e.Value.GetProperty("p").GetInt32(), e.Value.GetProperty("o").GetInt32())),
-        val.EnumerateObject().ToDictionary(e => e.Name.ToUpperInvariant(), e => e.Value.GetDouble()));
 }
 
 /// <summary>
@@ -434,8 +402,6 @@ public sealed class DataAssets
     public required CommandLibrary Commands { get; init; }
     public required Modules Modules { get; init; }
     public required CharacterMap Characters { get; init; }
-    public required EffectSignatures Signatures { get; init; }
-    public required ParameterTables Parameters { get; init; }
     public required DeviceCapabilities Capabilities { get; init; }
 
     public static DataAssets Load()
@@ -449,16 +415,12 @@ public sealed class DataAssets
             return doc.RootElement.Clone();
         }
 
-        var effects = EffectLibrary.FromJson(Read("effect_library"));
-
         return new DataAssets
         {
-            Effects = effects,
+            Effects = EffectLibrary.FromJson(Read("effect_library")),
             Commands = CommandLibrary.FromJson(Read("command_library")),
             Modules = Modules.FromJson(Read("modules")),
             Characters = CharacterMap.FromJson(Read("character_map")),
-            Signatures = EffectSignatures.Build(Read("effect_signatures"), effects),
-            Parameters = ParameterTables.FromJson(Read("algid_location_map"), Read("value_reverse_lookup")),
             Capabilities = DeviceCapabilities.FromJson(Read("device_capabilities")),
         };
     }
@@ -476,8 +438,6 @@ public sealed class DataAssets
             Commands = Commands,
             Modules = Modules,
             Characters = Characters,
-            Signatures = Signatures,
-            Parameters = Parameters,
             Capabilities = Capabilities,
         };
     }

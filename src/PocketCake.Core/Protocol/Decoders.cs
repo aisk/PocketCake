@@ -1,32 +1,130 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using PocketCake.Core.Model;
 
 namespace PocketCake.Core.Protocol;
 
-/// <summary>
-/// Decodes a preset-state dump (<c>020401</c> reply, reassembled <c>8080…F7</c>) into module
-/// states, chain order, amp mode, preset volume/BPM and footswitch masks.
-/// </summary>
-public sealed class PresetStateDecoder(Modules modules)
+/// <summary>One record of the pedal's TLV streams: <c>u16 address, u16 size, data[size]</c>, little-endian.</summary>
+public sealed record TlvRecord(int Address, byte[] Data)
 {
-    private const string UsbHeader = "8080F00706000100000000";
+    /// <summary>The data (up to 4 bytes) as a little-endian integer, sign-extended from its size.</summary>
+    public int Int
+    {
+        get
+        {
+            var n = Math.Min(Data.Length, 4);
+            long v = 0;
 
-    // Per-preset fields: `<idx>020000040000` then a 16-bit LE value. 01 = Patch Vol, 02 = BPM.
-    private const string VolumeMarker = "01020000040000";
-    private const string BpmMarker = "02020000040000";
-    private const string ChainMarker = "0A000000";
+            for (var i = n - 1; i >= 0; i--)
+            {
+                v = (v << 8) | Data[i];
+            }
 
-    // Footswitch masks: dumpHex byte offsets of each 16-bit LE mask's first nibble-byte.
-    private const int Fs1MaskByte = 947;
-    private const int Fs2MaskByte = 955;
+            var bits = n * 8;
 
-    /// <summary>Returns null on any malformed/short dump rather than throwing.</summary>
-    public DecodedPresetState? Decode(string dumpHex)
+            if (bits is > 0 and < 32 && (v & (1L << (bits - 1))) != 0)
+            {
+                v -= 1L << bits;
+            }
+
+            return (int)v;
+        }
+    }
+}
+
+/// <summary>Splits the TLV streams the pedal answers dumps with (preset state, global settings).</summary>
+public static class Tlv
+{
+    /// <summary>Splits <paramref name="data"/> into records; throws <see cref="FormatException"/> if one overruns it.</summary>
+    public static List<TlvRecord> Parse(ReadOnlySpan<byte> data)
+    {
+        var records = new List<TlvRecord>();
+        var i = 0;
+
+        while (i < data.Length)
+        {
+            if (i + 4 > data.Length)
+            {
+                throw new FormatException("truncated TLV header");
+            }
+
+            var address = BinaryPrimitives.ReadUInt16LittleEndian(data[i..]);
+            var size = BinaryPrimitives.ReadUInt16LittleEndian(data[(i + 2)..]);
+
+            if (i + 4 + size > data.Length)
+            {
+                throw new FormatException($"TLV record 0x{address:X4} overruns the stream");
+            }
+
+            records.Add(new TlvRecord(address, data.Slice(i + 4, size).ToArray()));
+            i += 4 + size;
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// The TLV body of a reassembled reply frame: its logical bytes after the packet header
+    /// (<c>crc total seq len</c>) and the message address (<c>flag cmd</c>).
+    /// </summary>
+    public static byte[] Body(string frameHex)
+    {
+        var bytes = Hex.Logical(frameHex);
+
+        return bytes.Length >= 6 ? bytes[6..] : throw new FormatException("frame too short for a TLV body");
+    }
+}
+
+/// <summary>
+/// A preset-state dump (reply to <c>12 41</c>) read the way the official app reads it: a TLV stream of
+/// blocks, each itself a TLV list. Block 0x00 sizes the slot arrays, 0x01 holds volume and BPM, 0x02 the
+/// slots (slot i = module i, 9 = the clone amp) and 0x03 one footswitch mask per switch.
+/// </summary>
+public sealed record PresetDump(
+    int? Volume,
+    int? Bpm,
+    int StateMask,
+    byte[] Chain,
+    int[] Algorithms,
+    float[] Values,
+    int ParamCount,
+    int[] FootswitchMasks)
+{
+    private const int DefineBlock = 0x00;
+    private const int InfoBlock = 0x01;
+    private const int SlotBlock = 0x02;
+    private const int FootswitchBlock = 0x03;
+
+    /// <summary>The dump's contents, or null if it is malformed or has no slot block.</summary>
+    public static PresetDump? Parse(string dumpHex)
     {
         try
         {
-            return DecodeCore(dumpHex);
+            var blocks = Tlv.Parse(Tlv.Body(dumpHex));
+
+            List<TlvRecord>? Block(int address) =>
+                blocks.FirstOrDefault(b => b.Address == address) is { } b ? Tlv.Parse(b.Data) : null;
+
+            static TlvRecord? Find(List<TlvRecord>? list, int address) => list?.FirstOrDefault(r => r.Address == address);
+
+            if (Block(SlotBlock) is not { } slots)
+            {
+                return null;
+            }
+
+            var define = Block(DefineBlock);
+            var info = Block(InfoBlock);
+
+            return new PresetDump(
+                Find(info, 0x2001)?.Int,
+                Find(info, 0x2002)?.Int,
+                Find(slots, 0x3001)?.Int ?? 0,
+                Find(slots, 0x3002)?.Data ?? [],
+                Ints(Find(slots, 0x3003)?.Data),
+                Floats(Find(slots, 0x3004)?.Data),
+                Find(define, 0x1002)?.Int ?? 8,
+                Ints(blocks.FirstOrDefault(b => b.Address == FootswitchBlock)?.Data));
         }
         catch
         {
@@ -34,177 +132,92 @@ public sealed class PresetStateDecoder(Modules modules)
         }
     }
 
-    private static int? ReadU16(List<string> payload, string payloadStr, string marker)
+    /// <summary>The stored value of parameter <paramref name="param"/> of slot <paramref name="slot"/>, if present.</summary>
+    public float? Value(int slot, int param)
     {
-        var mi = payloadStr.IndexOf(marker, StringComparison.Ordinal);
+        var i = slot * ParamCount + param;
 
-        if (mi < 0 || mi % 2 != 0)
-        {
-            return null;
-        }
-
-        var b = (mi + marker.Length) / 2;
-
-        if (b + 3 >= payload.Count)
-        {
-            return null;
-        }
-
-        var lo = (HexVal(payload[b]) << 4) | HexVal(payload[b + 1]);
-        var hi = (HexVal(payload[b + 2]) << 4) | HexVal(payload[b + 3]);
-
-        return (hi << 8) | lo;
+        return param >= 0 && param < ParamCount && i >= 0 && i < Values.Length && !float.IsNaN(Values[i]) ? Values[i] : null;
     }
 
-    private static int FootswitchMask(string dumpHex, int byteOffset)
+    private static int[] Ints(byte[]? data) =>
+        data is null ? [] : Enumerable.Range(0, data.Length / 4).Select(i => BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(i * 4))).ToArray();
+
+    private static float[] Floats(byte[]? data) =>
+        data is null ? [] : Enumerable.Range(0, data.Length / 4).Select(i => BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan(i * 4))).ToArray();
+}
+
+/// <summary>
+/// Decodes a preset-state dump into module states, chain order, amp mode, preset volume/BPM and
+/// footswitch masks.
+/// </summary>
+public sealed class PresetStateDecoder(Modules modules)
+{
+    private const int ChainLength = 9;
+
+    /// <summary>Returns null on any malformed/short dump rather than throwing.</summary>
+    public DecodedPresetState? Decode(string dumpHex)
     {
-        if ((byteOffset + 4) * 2 > dumpHex.Length)
-        {
-            return 0;
-        }
-
-        int NibbleByte(int b) =>
-            int.TryParse(dumpHex.AsSpan(b * 2, 2), NumberStyles.HexNumber, null, out var v) ? v : 0;
-
-        var low = (NibbleByte(byteOffset) << 4) | NibbleByte(byteOffset + 1);
-        var high = (NibbleByte(byteOffset + 2) << 4) | NibbleByte(byteOffset + 3);
-
-        return low | (high << 8);
-    }
-
-    private DecodedPresetState? DecodeCore(string dumpHex)
-    {
-        if (dumpHex.Length < 422)
+        if (PresetDump.Parse(dumpHex) is not { } dump)
         {
             return null;
         }
 
-        var packet0 = $"{UsbHeader}{dumpHex[22..422]}F7";
-        var bytes = Hex.Tokens(packet0);
-        var payload = bytes.GetRange(5, bytes.Count - 6);
-        var payloadStr = string.Concat(payload);
-
-        var presetVolume = ReadU16(payload, payloadStr, VolumeMarker) ?? 75;
-        var presetBpm = ReadU16(payload, payloadStr, BpmMarker) ?? 120;
-
-        var csi = payloadStr.LastIndexOf(ChainMarker, StringComparison.Ordinal);
-
-        if (csi < 0)
-        {
-            return null;
-        }
-
-        var chainByteIndex = csi / 2;
-        var globalStateByteIndex = chainByteIndex - 10;
-        var n1 = chainByteIndex - 13;
-        var n2 = chainByteIndex - 12;
-
-        if (globalStateByteIndex < 0 || n1 < 0)
-        {
-            return null;
-        }
-
-        var globalStateByte = HexVal(payload[globalStateByteIndex]);
-        var isCloneMode = (globalStateByte & 2) != 0;
-        var rvbOn = (globalStateByte & 1) != 0;
-        var mainBitmask = HexVal($"{payload[n1][1]}{payload[n2][1]}");
-
+        var isCloneMode = (dump.StateMask & (1 << ModuleIds.CloneAmp)) != 0;
         var moduleStates = new Dictionary<string, bool>();
 
-        for (var i = 0; i < 9; i++)
+        for (var i = 0; i < ChainLength; i++)
         {
-            var name = modules.NameOf(i);
-
-            if (name is null)
+            if (modules.NameOf(i) is { } name)
             {
-                continue;
-            }
-
-            var isOn = i == 8 ? rvbOn : (mainBitmask & (1 << i)) != 0;
-
-            if (isCloneMode && i == 4)
-            {
-                isOn = true;
-            }
-
-            moduleStates[name] = isOn;
-        }
-
-        var chainData = payload.GetRange(chainByteIndex + ChainMarker.Length / 2, payload.Count - (chainByteIndex + ChainMarker.Length / 2));
-        var chainIds = new List<int>();
-        var seen = new HashSet<int>();
-        var nrFound = false;
-
-        for (var i = 0; i < chainData.Count - 1; i++)
-        {
-            if (chainIds.Count >= 9)
-            {
-                break;
-            }
-
-            var id = HexVal(chainData[i]);
-
-            if (modules.NameOf(id) is not null && chainData[i + 1] == "00" && !seen.Contains(id))
-            {
-                chainIds.Add(id);
-                seen.Add(id);
-
-                if (id == 0)
-                {
-                    nrFound = true;
-                }
-
-                i++;
+                moduleStates[name] = (dump.StateMask & (1 << i)) != 0 || (isCloneMode && i == 4);
             }
         }
 
-        if (!nrFound && chainIds.Count < 9)
+        var chain = new List<string>();
+
+        foreach (var id in dump.Chain)
         {
-            chainIds.Insert(0, 0);
+            if (chain.Count < ChainLength && id < ChainLength && modules.NameOf(id) is { } name && !chain.Contains(name))
+            {
+                chain.Add(name);
+            }
+        }
+
+        if (chain.Count == 0)
+        {
+            return null;
         }
 
         return new DecodedPresetState(
             isCloneMode,
-            presetVolume,
-            presetBpm,
+            dump.Volume ?? 75,
+            dump.Bpm ?? 120,
             moduleStates,
-            chainIds.Select(id => modules.NameOf(id)!).ToList(),
-            FootswitchMask(dumpHex, Fs1MaskByte),
-            FootswitchMask(dumpHex, Fs2MaskByte));
+            chain,
+            dump.FootswitchMasks.ElementAtOrDefault(0),
+            dump.FootswitchMasks.ElementAtOrDefault(1));
     }
-
-    private static int HexVal(string s) => int.Parse(s, NumberStyles.HexNumber);
 }
 
-/// <summary>Decodes which effect fxId is selected per module from a preset-state dump.</summary>
-public sealed class SelectedEffectsDecoder(EffectSignatures signatures)
+/// <summary>Decodes which effect is selected per module from a preset-state dump.</summary>
+public sealed class SelectedEffectsDecoder(CommandLibrary commands)
 {
-    private const string UsbHeader = "8080F00706000100000000";
-
     public Dictionary<int, int> Decode(string dumpHex)
     {
-        if (dumpHex.Length < 822)
+        if (PresetDump.Parse(dumpHex) is not { } dump)
         {
             return [];
         }
 
-        var bytes = Hex.Tokens($"{UsbHeader}{dumpHex[422..822]}F7");
-
         // NR is a fixed single-effect module: it always runs the Gate effect (fxId 1).
         var result = new Dictionary<int, int> { [0] = 1 };
 
-        foreach (var (moduleId, spec) in signatures.ByModule)
+        for (var slot = 1; slot < dump.Algorithms.Length; slot++)
         {
-            if (bytes.Count < spec.Offset + spec.Length)
+            if (commands.EffectIdOf(slot, dump.Algorithms[slot]) is { } fxId)
             {
-                continue;
-            }
-
-            var sig = string.Concat(bytes.GetRange(spec.Offset, spec.Length)).ToUpperInvariant();
-
-            if (spec.SignatureToFxId.TryGetValue(sig, out var fxId))
-            {
-                result[moduleId] = fxId;
+                result[slot] = fxId;
             }
         }
 
@@ -212,32 +225,15 @@ public sealed class SelectedEffectsDecoder(EffectSignatures signatures)
     }
 }
 
-/// <summary>Decodes each selected effect's parameter values from a preset-state dump.</summary>
-public sealed class ParameterValuesDecoder(ParameterTables tables)
+/// <summary>Decodes each selected effect's parameter values (float32 in the dump) from a preset-state dump.</summary>
+public static class ParameterValuesDecoder
 {
-    private const string UsbHeader = "8080F00706000100000000";
-
-    public Dictionary<int, Dictionary<int, double>> Decode(string dumpHex, IReadOnlyDictionary<int, int> selectedEffects, EffectLibrary effects)
+    public static Dictionary<int, Dictionary<int, double>> Decode(string dumpHex, IReadOnlyDictionary<int, int> selectedEffects, EffectLibrary effects)
     {
-        try
-        {
-            return DecodeCore(dumpHex, selectedEffects, effects);
-        }
-        catch
+        if (PresetDump.Parse(dumpHex) is not { } dump)
         {
             return [];
         }
-    }
-
-    private Dictionary<int, Dictionary<int, double>> DecodeCore(string dumpHex, IReadOnlyDictionary<int, int> selectedEffects, EffectLibrary effects)
-    {
-        if (dumpHex.Length < 1623)
-        {
-            return [];
-        }
-
-        int[][] slices = [[22, 422], [422, 822], [822, 1222], [1222, 1622], [1622, dumpHex.Length - 1]];
-        var packets = slices.Select(s => Hex.Tokens($"{UsbHeader}{dumpHex[s[0]..s[1]]}F7")).ToList();
 
         var selected = new Dictionary<int, int> { [0] = 1 }; // NR always fx slot 1
 
@@ -250,9 +246,7 @@ public sealed class ParameterValuesDecoder(ParameterTables tables)
 
         foreach (var (moduleId, fxId) in selected)
         {
-            var def = effects.ById(fxId);
-
-            if (def is null)
+            if (effects.ById(fxId) is not { } def)
             {
                 continue;
             }
@@ -261,24 +255,10 @@ public sealed class ParameterValuesDecoder(ParameterTables tables)
 
             foreach (var param in def.Params)
             {
-                if (!tables.Locations.TryGetValue($"{moduleId}_{param.AlgId}", out var loc))
+                // Rounded to drop float32 noise (0.1f reads back as 0.100000001).
+                if (dump.Value(moduleId, param.AlgId) is { } value)
                 {
-                    continue;
-                }
-
-                var packet = loc.Packet >= 0 && loc.Packet < packets.Count ? packets[loc.Packet] : null;
-
-                // Value block is 6 bytes (12 hex chars), e.g. "000004080C02".
-                if (packet is null || loc.Offset < 0 || packet.Count < loc.Offset + 6)
-                {
-                    continue;
-                }
-
-                var block = string.Concat(packet.GetRange(loc.Offset, 6)).ToUpperInvariant();
-
-                if (tables.ValueLookup.TryGetValue(block, out var value))
-                {
-                    ps[param.AlgId] = value;
+                    ps[param.AlgId] = Math.Round(value, 4);
                 }
             }
 

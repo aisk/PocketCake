@@ -119,6 +119,15 @@ public sealed class CommandLibraryTests
     }
 
     [Fact]
+    public void EffectIdOfReversesSelectFrames()
+    {
+        Assert.Equal(201, Cmd.EffectIdOf(2, 0x03000000)); // Scream
+        Assert.Equal(202, Cmd.EffectIdOf(2, 0x03000002)); // Butter OD
+        Assert.Equal(902, Cmd.EffectIdOf(9, 0x0F000001)); // User Profile 2
+        Assert.Null(Cmd.EffectIdOf(2, 0x7FFFFFFF));
+    }
+
+    [Fact]
     public void UserProfilesSelectCloneAlgorithms()
     {
         // User Profile n is algorithm 0x0F0000nn, the id a clone upload into slot n writes.

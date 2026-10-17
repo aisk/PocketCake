@@ -180,6 +180,68 @@ public sealed class NameDumpDecoderTests
     }
 }
 
+public sealed class TlvTests
+{
+    [Fact]
+    public void SplitsRecordsAndSignExtends()
+    {
+        var records = Tlv.Parse(new byte[] { 0x01, 0x03, 0x01, 0x00, 0xFE, 0x02, 0x20, 0x04, 0x00, 0x78, 0x00, 0x00, 0x00 });
+
+        Assert.Equal(2, records.Count);
+        Assert.Equal(0x0301, records[0].Address);
+        Assert.Equal(-2, records[0].Int);
+        Assert.Equal(0x2002, records[1].Address);
+        Assert.Equal(120, records[1].Int);
+    }
+
+    [Fact]
+    public void OverrunningRecordThrows()
+    {
+        Assert.Throws<FormatException>(() => Tlv.Parse(new byte[] { 0x01, 0x00, 0x08, 0x00, 0x00 }));
+    }
+}
+
+public sealed class PresetDumpTests
+{
+    [Fact]
+    public void ReadsU01Blocks()
+    {
+        var d = PresetDump.Parse(Captures.U01StateDump)!;
+
+        Assert.Equal(60, d.Volume);
+        Assert.Equal(120, d.Bpm);
+        Assert.Equal(8, d.ParamCount);
+        Assert.Equal([0, 1, 2, 3, 4, 5, 6, 7, 8], d.Chain[..9]);
+        Assert.Equal(10, d.Algorithms.Length);
+        Assert.Equal(80, d.Values.Length);
+        Assert.Equal([0x004, 0x180], d.FootswitchMasks);
+    }
+
+    [Fact]
+    public void TruncatedDumpIsRejected()
+    {
+        // Dropping the last record bytes makes the footswitch block overrun the stream.
+        Assert.Null(PresetDump.Parse(Captures.U01StateDump[..^18] + "F7"));
+    }
+
+    [Fact]
+    public void EveryCaptureDecodesEveryParameterOfItsEffects()
+    {
+        foreach (var dump in new[] { Captures.U01StateDump, Captures.U02StateDump, Captures.P05StateDump, Captures.P09StateDump, Captures.P12StateDump })
+        {
+            var selected = new SelectedEffectsDecoder(TestData.Assets.Commands).Decode(dump);
+            var values = ParameterValuesDecoder.Decode(dump, selected, TestData.Assets.Effects);
+
+            foreach (var (module, fx) in selected)
+            {
+                Assert.Equal(
+                    TestData.Assets.Effects.ById(fx)!.Params.Select(p => p.AlgId).Order(),
+                    values[module].Keys.Order());
+            }
+        }
+    }
+}
+
 public sealed class ParameterValuesDecoderTests
 {
     private static readonly Dictionary<int, int> SelU01 = new()
@@ -187,14 +249,12 @@ public sealed class ParameterValuesDecoderTests
         [1] = 101, [2] = 201, [4] = 410, [5] = 501, [6] = 101, [7] = 705, [8] = 806, [9] = 901,
     };
 
-    private readonly ParameterValuesDecoder _decoder = new(TestData.Assets.Parameters);
-
     private static Dictionary<int, double> D(params (int K, double V)[] e) => e.ToDictionary(x => x.K, x => x.V);
 
     [Fact]
     public void DecodesU01ParameterValues()
     {
-        var p = _decoder.Decode(Captures.U01StateDump, SelU01, TestData.Assets.Effects);
+        var p = ParameterValuesDecoder.Decode(Captures.U01StateDump, SelU01, TestData.Assets.Effects);
 
         Assert.Equal(D((0, 20)), p[0]); // NR THRE (force-added)
         Assert.Equal(D((0, 0), (1, 75), (2, 50)), p[2]); // DRV Scream
@@ -205,12 +265,6 @@ public sealed class ParameterValuesDecoderTests
     }
 
     [Fact]
-    public void ValueLookupPreservesFractionalValues()
-    {
-        Assert.Equal(0.1, TestData.Assets.Parameters.ValueLookup["0C0C0C0C030D"]);
-    }
-
-    [Fact]
     public void DecodesU02()
     {
         var sel = new Dictionary<int, int>
@@ -218,7 +272,7 @@ public sealed class ParameterValuesDecoderTests
             [1] = 101, [2] = 201, [4] = 405, [5] = 502, [6] = 101, [7] = 702, [8] = 806, [9] = 901,
         };
 
-        var p = _decoder.Decode(Captures.U02StateDump, sel, TestData.Assets.Effects);
+        var p = ParameterValuesDecoder.Decode(Captures.U02StateDump, sel, TestData.Assets.Effects);
 
         Assert.Equal(D((0, 10)), p[0]);
         Assert.Equal(D((0, 10), (1, 70), (2, 40)), p[2]);
@@ -227,7 +281,7 @@ public sealed class ParameterValuesDecoderTests
     [Fact]
     public void ShortDumpIsEmpty()
     {
-        Assert.Empty(_decoder.Decode("8080F0F7", SelU01, TestData.Assets.Effects));
+        Assert.Empty(ParameterValuesDecoder.Decode("8080F0F7", SelU01, TestData.Assets.Effects));
     }
 }
 
@@ -340,7 +394,7 @@ public sealed class PresetStateDecoderTests
 
 public sealed class SelectedEffectsDecoderTests
 {
-    private readonly SelectedEffectsDecoder _decoder = new(TestData.Assets.Signatures);
+    private readonly SelectedEffectsDecoder _decoder = new(TestData.Assets.Commands);
 
     [Fact]
     public void DecodesU01()

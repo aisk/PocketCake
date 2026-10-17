@@ -686,11 +686,11 @@ public sealed partial class AppState : INotifyPropertyChanged
 
     private void ApplyDecodedDump(DataAssets data, string dumpHex)
     {
-        var selected = new SelectedEffectsDecoder(data.Signatures).Decode(dumpHex);
+        var selected = new SelectedEffectsDecoder(data.Commands).Decode(dumpHex);
 
         PresetState = new PresetStateDecoder(data.Modules).Decode(dumpHex);
         SelectedEffects = selected;
-        Parameters = new ParameterValuesDecoder(data.Parameters).Decode(dumpHex, selected, data.Effects);
+        Parameters = ParameterValuesDecoder.Decode(dumpHex, selected, data.Effects);
 
         // In clone mode the AMP editor target is the clone amp.
         if (PresetState is { } st)
