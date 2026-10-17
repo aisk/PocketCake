@@ -99,6 +99,52 @@ public static class PresetFieldFrame
 }
 
 /// <summary>
+/// Stored-preset commands addressed by global preset index (0–49 = P01–P50, 50–99 = F01–F50). Each
+/// writes flash directly; none touches the live edit buffer.
+/// </summary>
+public static class PresetCommandFrame
+{
+    public const int NameChars = 10;
+
+    /// <summary>Renames a stored preset: <c>11 4C &lt;index u32&gt; &lt;name, 10 bytes&gt;</c>.</summary>
+    public static string Rename(int index, string name)
+    {
+        var bytes = new int[NameChars];
+        var ascii = IrUploadFrame.AsciiName(name, NameChars);
+
+        for (var i = 0; i < ascii.Length; i++)
+        {
+            bytes[i] = ascii[i];
+        }
+
+        return SysexWriteFrame.Build([0x11, 0x4C, .. U32(index), .. bytes]);
+    }
+
+    /// <summary>Copies stored preset <paramref name="source"/> over <paramref name="destination"/>: <c>11 4B &lt;dest u16&gt; &lt;src u16&gt;</c>.</summary>
+    public static string Copy(int source, int destination) =>
+        SysexWriteFrame.Build([0x11, 0x4B, destination & 0xFF, (destination >> 8) & 0xFF, source & 0xFF, (source >> 8) & 0xFF]);
+
+    /// <summary>Restores a user preset to its factory content: <c>11 1F &lt;index u32&gt;</c>.</summary>
+    public static string Reset(int index) => SysexWriteFrame.Build([0x11, 0x1F, .. U32(index)]);
+
+    /// <summary>Reads a stored preset without selecting it: <c>12 4F &lt;index u32&gt;</c>; the reply carries a <see cref="PresetFile"/> body.</summary>
+    public static string Read(int index) => SysexWriteFrame.Build([0x12, 0x4F, .. U32(index)]);
+
+    internal static int[] U32(int v) => [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF];
+}
+
+/// <summary>
+/// Tuner mode: <c>11 15 | 0x15, 1</c> enters it and <c>11 16 | 0x16</c> leaves it (int32 LE each). While it is
+/// on, the pedal pushes <c>cmd 0x15</c> frames (see <see cref="TunerReading"/>).
+/// </summary>
+public static class TunerFrame
+{
+    public static string Enter { get; } = SysexWriteFrame.Build([0x11, 0x15, .. PresetCommandFrame.U32(0x15), .. PresetCommandFrame.U32(1)]);
+
+    public static string Quit { get; } = SysexWriteFrame.Build([0x11, 0x16, .. PresetCommandFrame.U32(0x16)]);
+}
+
+/// <summary>
 /// Footswitch write (register 0x4D): payload <c>11 4D &lt;switch&gt; &lt;module&gt; &lt;state&gt;</c>.
 /// A per-switch toggle, not a full-state write.
 /// </summary>

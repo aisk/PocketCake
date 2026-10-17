@@ -221,6 +221,14 @@ public sealed class DeviceService : IAsyncDisposable
     /// <summary>Requests a 5-slot user-name dump (<see cref="CloneNamesRequest"/> or <see cref="IrNamesRequest"/>).</summary>
     public Task<string?> RequestUserNamesAsync(string requestHex) => RequestDataFrameAsync(requestHex, TimeSpan.FromSeconds(1));
 
+    /// <summary>Reads stored preset <paramref name="index"/> as a <see cref="PresetFile"/> (<c>12 4F</c>) without selecting it.</summary>
+    public Task<string?> RequestPresetFileAsync(int index) =>
+        RequestDataFrameAsync(PresetCommandFrame.Read(index), TimeSpan.FromSeconds(2));
+
+    /// <summary>Writes a <see cref="PresetFile"/> into a stored preset; the pedal sends no commit notification, so the ACKs end it.</summary>
+    public Task<WriteResult> ImportPresetFileAsync(IReadOnlyList<string> chunks, Action<int, int>? onProgress = null) =>
+        WriteChunksAsync(chunks, null, onProgress);
+
     public Task<WriteResult> UploadIrAsync(IReadOnlyList<string> chunks, Action<int, int>? onProgress = null) =>
         WriteChunksAsync(chunks, IrCommitSig, onProgress);
 
@@ -229,10 +237,10 @@ public sealed class DeviceService : IAsyncDisposable
 
     /// <summary>
     /// Sends each chunk, waiting for its ACK (retransmitting a dropped ACK up to 10 times), then
-    /// waits for the commit notification matching <paramref name="commitSig"/>. The commit listener
+    /// waits for the commit notification matching <paramref name="commitSig"/> (if any). The commit listener
     /// is attached before the first chunk so a notification racing the last ACK is not missed.
     /// </summary>
-    private Task<WriteResult> WriteChunksAsync(IReadOnlyList<string> chunks, string commitSig, Action<int, int>? onProgress) =>
+    private Task<WriteResult> WriteChunksAsync(IReadOnlyList<string> chunks, string? commitSig, Action<int, int>? onProgress) =>
         SerializedAsync(async () =>
         {
             var ackTimeout = TimeSpan.FromMilliseconds(1200);
@@ -240,7 +248,7 @@ public sealed class DeviceService : IAsyncDisposable
 
             void OnCommit(InboundMessage m)
             {
-                if (m is DataFrame d && d.Hex.Contains(commitSig, StringComparison.OrdinalIgnoreCase))
+                if (commitSig is not null && m is DataFrame d && d.Hex.Contains(commitSig, StringComparison.OrdinalIgnoreCase))
                 {
                     commit.TrySetResult();
                 }
@@ -265,6 +273,11 @@ public sealed class DeviceService : IAsyncDisposable
                     }
 
                     onProgress?.Invoke(i + 1, chunks.Count);
+                }
+
+                if (commitSig is null)
+                {
+                    return WriteResult.Committed;
                 }
 
                 var done = await Task.WhenAny(commit.Task, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);

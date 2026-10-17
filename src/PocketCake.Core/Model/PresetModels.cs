@@ -8,6 +8,9 @@ public readonly record struct PresetRef(PresetBank Bank, int Number)
 {
     public string Label => $"{(Bank == PresetBank.User ? "P" : "F")}{Number:D2}";
 
+    /// <summary>The device's global preset index (P01 = 0 … F50 = 99).</summary>
+    public int Index => (Bank == PresetBank.User ? 0 : 50) + Number - 1;
+
     /// <summary>User P01–P50 then Factory F01–F50 — the device's global preset index order.</summary>
     public static IReadOnlyList<PresetRef> All { get; } =
         [.. Enumerable.Range(1, 50).Select(n => new PresetRef(PresetBank.User, n)),
