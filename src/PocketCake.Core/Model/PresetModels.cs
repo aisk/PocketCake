@@ -39,7 +39,8 @@ public sealed record GlobalSettings(
     int Backlight = 0,
     int Eco = 0,
     int PowerConfirm = 0,
-    int BattOnly = 0);
+    int BattOnly = 0,
+    string? FirmwareVersion = null);
 
 /// <summary>Fixed module and user-slot ids shared by the decoders, the editor and the agent tools.</summary>
 public static class ModuleIds

@@ -272,59 +272,74 @@ public static class ParameterValuesDecoder
     }
 }
 
-/// <summary>Decodes the device-global settings dump (<c>020102 0100</c> reply).</summary>
+/// <summary>
+/// Decodes the device-global settings dump (reply to <c>12 10</c>): a TLV stream keyed by the same
+/// record addresses the settings are written to (see <see cref="GlobalSettingRegisters"/>).
+/// </summary>
 public static class GlobalSettingsDecoder
 {
-    private static int Db(string p, int off)
-    {
-        var b1 = Hex.Byte(p, off);
-        var b2 = Hex.Byte(p, off + 2);
-
-        return b1 switch
-        {
-            0x0F => b2 - 16,
-            0x0E => b2 - 32,
-            _ => b1 * 16 + b2,
-        };
-    }
-
-    private static int U(string p, int off) => Hex.Byte(p, off) * 16 + Hex.Byte(p, off + 2);
-
-    private static int UAt(string p, int off) => off + 4 <= p.Length ? U(p, off) : 0;
+    public const int FirmwareRecord = 0x0101;
+    public const int VolumeRecord = 0x0202;
+    public const int FsFunctionsRecord = 0x0408;
+    public const int ExpFunctionRecord = 0x0409;
 
     public static GlobalSettings? Decode(string dumpHex)
     {
         try
         {
-            if (dumpHex.Length < 12)
+            var records = new Dictionary<int, TlvRecord>();
+
+            foreach (var r in Tlv.Parse(Tlv.Body(dumpHex)))
+            {
+                records.TryAdd(r.Address, r);
+            }
+
+            if (!records.TryGetValue(VolumeRecord, out var volume))
             {
                 return null;
             }
 
-            var p = dumpHex[10..^2];
+            int Int(string name) =>
+                records.TryGetValue(GlobalSettingRegisters.Address(name), out var r) ? r.Int : 0;
 
-            if (p.Length < 276)
+            int Byte(int address, int index) =>
+                records.TryGetValue(address, out var r) && index < r.Data.Length ? r.Data[index] : 0;
+
+            // FS functions: [0] single FS, [2] dual FS 1, [4] dual FS 2. EXP function: [1].
+            var type = Int("expFsType");
+            var target = type switch
             {
-                return null;
-            }
+                0 => Byte(ExpFunctionRecord, 1),
+                1 => Byte(FsFunctionsRecord, 0),
+                _ => Byte(FsFunctionsRecord, 2),
+            };
 
             return new GlobalSettings(
-                GlobalVolume: U(p, 100),
-                InputLevel: Db(p, 172),
-                FxRecLevel: Db(p, 192),
-                MonitorLevel: Db(p, 212),
-                BtRecLevel: Db(p, 272),
-                Backlight: UAt(p, 152),
-                Mode: UAt(p, 252),
-                Reamp: UAt(p, 292),
-                Eco: UAt(p, 312),
-                ExpFsType: UAt(p, 332));
+                GlobalVolume: volume.Int,
+                InputLevel: Int("inputLevel"),
+                FxRecLevel: Int("fxRecLevel"),
+                MonitorLevel: Int("monitorLevel"),
+                BtRecLevel: Int("btRecLevel"),
+                Mode: Int("mode"),
+                Reamp: Int("reamp"),
+                ExpFsType: type,
+                ExpFsTarget: target,
+                ExpFsTarget2: Byte(FsFunctionsRecord, 4),
+                Backlight: Int("backlight"),
+                Eco: Int("eco"),
+                PowerConfirm: Int("powerConfirm"),
+                BattOnly: Int("battOnly"),
+                FirmwareVersion: records.TryGetValue(FirmwareRecord, out var fw) ? FirmwareVersion(fw.Data) : null);
         }
         catch
         {
             return null;
         }
     }
+
+    /// <summary><c>[patch minor major release]</c> → "V1.3.3", or "B…" for a beta build (release byte 0).</summary>
+    public static string? FirmwareVersion(byte[] data) =>
+        data.Length >= 4 ? $"{(data[3] != 0 ? "V" : "B")}{data[2]}.{data[1]}.{data[0]}" : null;
 }
 
 /// <summary>Encodes/decodes preset names to/from the device's 4-hex-per-character encoding.</summary>

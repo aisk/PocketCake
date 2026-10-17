@@ -171,6 +171,25 @@ public static class GlobalSettingRegisters
         ["battOnly"] = (0x06, 0x02),
     };
 
+    /// <summary>The u16 record address of every setting the global dump carries (also the dumpRecord address).</summary>
+    public static readonly IReadOnlyDictionary<string, int> RecordAddress = new Dictionary<string, int>
+    {
+        ["globalVolume"] = 0x0202,
+        ["inputLevel"] = 0x0301,
+        ["fxRecLevel"] = 0x0401,
+        ["monitorLevel"] = 0x0402,
+        ["btRecLevel"] = 0x0405,
+        ["mode"] = 0x0404,
+        ["reamp"] = 0x0406,
+        ["expFsType"] = 0x0501,
+        ["backlight"] = 0x0203,
+        ["eco"] = 0x0204,
+        ["powerConfirm"] = 0x0205,
+        ["battOnly"] = 0x0206,
+    };
+
+    public static int Address(string name) => RecordAddress[name];
+
     public static readonly IReadOnlyList<string> ExpTargets = ["VOL", "FX1", "DRV", "AMP", "IR", "FX2", "DLY", "RVB"];
 
     public static readonly IReadOnlyList<string> FsTargets =

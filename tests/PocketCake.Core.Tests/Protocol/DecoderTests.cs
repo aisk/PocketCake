@@ -6,30 +6,26 @@ namespace PocketCake.Core.Tests.Protocol;
 
 public sealed class GlobalSettingsDecoderTests
 {
-    // Real capture from the device: globalVolume 60, all levels 0.
-    private const string Golden =
-        "8080F0030F0001000000000102010000010001000400000006000000010001000200010004000000010000000000000002000200040000030C0000000000000001000200010000000000030002000100000005000100030001000000000001000400010000000000020004000100000000000300040001000000010004000400010000000100050004000100000000000600040001000000000004000200010000000000010005000100000000000800040006000000020000000C0000000D00000009000400020000000000000005000200010000000100060002000100000000F7";
-
-    // Builds a dumpHex whose payload has the given 4-hex values at char offsets.
-    private static string DumpWith(Dictionary<int, string> at)
+    // Builds a `12 10` reply carrying the given TLV records, every logical byte as a nibble pair.
+    private static string Dump(params (int Address, byte[] Data)[] records)
     {
-        var buf = Enumerable.Repeat('0', 400).ToArray();
+        var bytes = new List<byte> { 0x00, 0x01, 0x00, 0x00, 0x12, 0x10 };
 
-        foreach (var (off, v) in at)
+        foreach (var (address, data) in records)
         {
-            for (var i = 0; i < v.Length; i++)
-            {
-                buf[off + i] = v[i];
-            }
+            bytes.AddRange([(byte)address, (byte)(address >> 8), (byte)data.Length, (byte)(data.Length >> 8)]);
+            bytes.AddRange(data);
         }
 
-        return $"0123456789{new string(buf)}F7";
+        return "8080F0" + string.Concat(bytes.Select(b => $"0{b >> 4:X}0{b & 0xF:X}")) + "F7";
     }
+
+    private static (int, byte[]) Volume(int v) => (0x0202, [(byte)v, 0, 0, 0]);
 
     [Fact]
     public void DecodesGoldenDump()
     {
-        var g = GlobalSettingsDecoder.Decode(Golden);
+        var g = GlobalSettingsDecoder.Decode(Captures.GlobalSettingsDump);
 
         Assert.NotNull(g);
         Assert.Equal(60, g.GlobalVolume);
@@ -37,61 +33,70 @@ public sealed class GlobalSettingsDecoderTests
         Assert.Equal(0, g.FxRecLevel);
         Assert.Equal(0, g.MonitorLevel);
         Assert.Equal(0, g.BtRecLevel);
+        Assert.Equal(5, g.Backlight);
+        Assert.Equal(1, g.Mode);
+        Assert.Equal(0, g.Reamp);
+        Assert.Equal(0, g.Eco);
+        Assert.Equal(0, g.ExpFsType);
+        Assert.Equal(1, g.PowerConfirm);
+        Assert.Equal(0, g.BattOnly);
+        Assert.Equal("V1.0.6", g.FirmwareVersion);
     }
 
     [Fact]
-    public void DecodesGlobalVolume()
+    public void DecodesSignedDbLevels()
     {
-        Assert.Equal(100, GlobalSettingsDecoder.Decode(DumpWith(new() { [100] = "0604" }))!.GlobalVolume);
-    }
+        var g = GlobalSettingsDecoder.Decode(Dump(
+            Volume(100), (0x0301, [0xFF]), (0x0401, [0xEC]), (0x0402, [0x14]), (0x0405, [0xEB])))!;
 
-    [Fact]
-    public void DecodesDbLevels()
-    {
-        var g = GlobalSettingsDecoder.Decode(DumpWith(new() { [172] = "0F0F", [192] = "0E0C", [212] = "0104", [272] = "0005" }))!;
-
+        Assert.Equal(100, g.GlobalVolume);
         Assert.Equal(-1, g.InputLevel);
         Assert.Equal(-20, g.FxRecLevel);
         Assert.Equal(20, g.MonitorLevel);
-        Assert.Equal(5, g.BtRecLevel);
+        Assert.Equal(-21, g.BtRecLevel);
     }
 
     [Fact]
-    public void DecodesNewlyBoundOffsets()
+    public void TargetFollowsTheExpFsType()
     {
-        var g = GlobalSettingsDecoder.Decode(DumpWith(new()
-        {
-            [152] = "000A",
-            [252] = "0001",
-            [292] = "0001",
-            [312] = "0001",
-            [332] = "0002",
-        }))!;
+        (int, byte[]) fs = (0x0408, [0x02, 0, 0x0C, 0, 0x0D, 0]);
+        (int, byte[]) exp = (0x0409, [0x00, 0x05]);
 
-        Assert.Equal(10, g.Backlight);
-        Assert.Equal(1, g.Mode);
-        Assert.Equal(1, g.Reamp);
+        var asExp = GlobalSettingsDecoder.Decode(Dump(Volume(50), (0x0501, [0]), fs, exp))!;
+        var single = GlobalSettingsDecoder.Decode(Dump(Volume(50), (0x0501, [1]), fs, exp))!;
+        var dual = GlobalSettingsDecoder.Decode(Dump(Volume(50), (0x0501, [2]), fs, exp))!;
+
+        Assert.Equal(5, asExp.ExpFsTarget);
+        Assert.Equal(2, single.ExpFsTarget);
+        Assert.Equal((2, 12, 13), (dual.ExpFsType, dual.ExpFsTarget, dual.ExpFsTarget2));
+    }
+
+    [Fact]
+    public void RecordOrderDoesNotMatter()
+    {
+        var g = GlobalSettingsDecoder.Decode(Dump((0x0206, [1]), (0x0204, [1]), Volume(42), (0x0101, [3, 3, 1, 0])))!;
+
+        Assert.Equal(42, g.GlobalVolume);
+        Assert.Equal(1, g.BattOnly);
         Assert.Equal(1, g.Eco);
-        Assert.Equal(2, g.ExpFsType);
+        Assert.Equal("B1.3.3", g.FirmwareVersion);
     }
 
     [Fact]
-    public void ShortDumpDecodesCoreWithoutCrash()
+    public void MissingRecordsDefaultToZero()
     {
-        var shortDump = $"0123456789{new string('0', 272)}0005{new string('0', 14)}F7";
+        var g = GlobalSettingsDecoder.Decode(Dump(Volume(10)))!;
 
-        var g = GlobalSettingsDecoder.Decode(shortDump);
-
-        Assert.NotNull(g);
-        Assert.Equal(5, g.BtRecLevel);
-        Assert.Equal(0, g.Eco);
-        Assert.Equal(0, g.ExpFsType);
+        Assert.Equal(0, g.Backlight);
+        Assert.Null(g.FirmwareVersion);
     }
 
     [Fact]
-    public void ReturnsNullOnTooShortDump()
+    public void ReturnsNullWithoutVolumeOrOnTruncation()
     {
         Assert.Null(GlobalSettingsDecoder.Decode("8080F00000F7"));
+        Assert.Null(GlobalSettingsDecoder.Decode(Dump((0x0203, [5]))));
+        Assert.Null(GlobalSettingsDecoder.Decode(Captures.GlobalSettingsDump[..^10] + "F7"));
     }
 }
 

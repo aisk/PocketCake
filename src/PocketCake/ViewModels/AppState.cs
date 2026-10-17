@@ -1149,18 +1149,6 @@ public sealed partial class AppState : INotifyPropertyChanged
         return OpResult.Ok;
     }
 
-    /// <summary>Re-applies the fields the settings dump doesn't carry, so a re-read doesn't reset them.</summary>
-    private static GlobalSettings WithUnreadable(GlobalSettings decoded, GlobalSettings? prev) =>
-        prev is null
-            ? decoded
-            : decoded with
-            {
-                PowerConfirm = prev.PowerConfirm,
-                BattOnly = prev.BattOnly,
-                ExpFsTarget = prev.ExpFsTarget,
-                ExpFsTarget2 = prev.ExpFsTarget2,
-            };
-
     /// <summary>Reads + decodes the device-global settings under the operation gate. Skipped while busy.</summary>
     public Task<OpResult> RefreshGlobalSettingsAsync() => RunExclusiveAsync(RefreshGlobalSettingsCoreAsync);
 
@@ -1170,9 +1158,8 @@ public sealed partial class AppState : INotifyPropertyChanged
         {
             if (await _service.RequestGlobalSettingsAsync() is { } dump && GlobalSettingsDecoder.Decode(dump) is { } g)
             {
-                var merged = WithUnreadable(g, GlobalSettings);
-                GlobalSettings = merged;
-                GlobalVolume = merged.GlobalVolume;
+                GlobalSettings = g;
+                GlobalVolume = g.GlobalVolume;
 
                 return OpResult.Ok;
             }
@@ -1216,9 +1203,8 @@ public sealed partial class AppState : INotifyPropertyChanged
                 return;
             }
 
-            var merged = WithUnreadable(g, GlobalSettings);
-            GlobalSettings = merged;
-            GlobalVolume = merged.GlobalVolume;
+            GlobalSettings = g;
+            GlobalVolume = g.GlobalVolume;
         }
         finally
         {
