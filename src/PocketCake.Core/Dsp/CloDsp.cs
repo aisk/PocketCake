@@ -16,7 +16,13 @@ namespace PocketCake.Core.Dsp;
 /// <param name="Gains">[posmax, negmax, pos_rate, neg_rate], f32-rounded.</param>
 public sealed record CloArrays(float[] ArrayA, float[] ArrayB, double[] Gains);
 
-/// <summary>NAM (.nam WaveNet) to Sonicake `.clo` clone-model generator.</summary>
+/// <summary>
+/// NAM (.nam WaveNet) to Sonicake `.clo` clone-model generator. The pedal's clone model is a
+/// fixed Wiener-Hammerstein chain (128-tap pre-FIR, asymmetric exponential saturator, 2048-tap
+/// post-FIR at 44.1 kHz); this probes the WaveNet with the reference DI at several levels and
+/// fits that chain to the responses. It is a deterministic approximation: multi-stage gain and
+/// time-dependent behaviour (sag, compression) of the NAM model are not reproduced.
+/// </summary>
 public static partial class CloDsp
 {
     internal const int ArrayALen = 128;

@@ -77,12 +77,23 @@
                 <ItemsControl ItemTemplate="{StaticResource SlotTemplate}" ItemsSource="{x:Bind ViewModel.IrSlots}" />
 
                 <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="User Profiles (.nam → clone)" />
+                <InfoBar
+                    Margin="0,0,0,8"
+                    IsClosable="False"
+                    IsOpen="True"
+                    Message="The pedal can't run NAM models. Each .nam is measured on this PC and fitted to the pedal's simpler clone model (filter → saturator → filter), so EQ, cabinet and overall distortion carry over, but multi-stage gain and dynamics such as sag or compression don't."
+                    Severity="Informational"
+                    Title="Converted, not copied">
+                    <InfoBar.ActionButton>
+                        <HyperlinkButton Content="How the conversion works" NavigateUri="https://github.com/aisk/PocketCake#nam-conversion" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
                 <ItemsControl ItemTemplate="{StaticResource SlotTemplate}" ItemsSource="{x:Bind ViewModel.CloneSlots}" />
                 <TextBlock
                     Margin="0,4,0,0"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="NAM models are converted to the pedal's clone format on this PC before upload. Slot names are limited to 10 characters for IRs and 15 for profiles."
+                    Text="Slot names are limited to 10 characters for IRs and 15 for profiles."
                     TextWrapping="Wrap" />
             </StackPanel>
         </Grid>
