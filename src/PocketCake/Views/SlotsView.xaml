@@ -20,10 +20,13 @@
                         Height="36"
                         Background="{x:Bind local:ModuleVisuals.Tint(Module)}"
                         CornerRadius="18">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="{x:Bind local:ModuleVisuals.Brush(Module)}"
-                            Glyph="{x:Bind local:ModuleVisuals.Glyph(Module)}" />
+                        <Viewbox Width="20" Height="20">
+                            <Path
+                                Width="24"
+                                Height="24"
+                                Data="{x:Bind local:ModuleVisuals.Icon(Module)}"
+                                Fill="{x:Bind local:ModuleVisuals.Brush(Module)}" />
+                        </Viewbox>
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />

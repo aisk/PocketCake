@@ -91,18 +91,17 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Border
-                            Width="30"
-                            Height="30"
+                        <Viewbox
+                            Width="34"
+                            Height="34"
                             HorizontalAlignment="Left"
-                            Background="{x:Bind local:ModuleVisuals.Tint(Name)}"
-                            CornerRadius="15"
                             Opacity="{x:Bind local:ModuleVisuals.Dim(IsOn), Mode=OneWay}">
-                            <FontIcon
-                                FontSize="15"
-                                Foreground="{x:Bind local:ModuleVisuals.Brush(Name)}"
-                                Glyph="{x:Bind local:ModuleVisuals.Glyph(Name)}" />
-                        </Border>
+                            <Path
+                                Width="24"
+                                Height="24"
+                                Data="{x:Bind local:ModuleVisuals.Icon(Name)}"
+                                Fill="{x:Bind local:ModuleVisuals.Brush(Name)}" />
+                        </Viewbox>
                         <Border
                             Margin="0,0,6,0"
                             Padding="5,0,5,1"
@@ -471,10 +470,13 @@
                         Height="32"
                         Background="{x:Bind local:ModuleVisuals.Tint(ViewModel.Editor.ModuleName), Mode=OneWay}"
                         CornerRadius="16">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="{x:Bind local:ModuleVisuals.Brush(ViewModel.Editor.ModuleName), Mode=OneWay}"
-                            Glyph="{x:Bind local:ModuleVisuals.Glyph(ViewModel.Editor.ModuleName), Mode=OneWay}" />
+                        <Viewbox Width="18" Height="18">
+                            <Path
+                                Width="24"
+                                Height="24"
+                                Data="{x:Bind local:ModuleVisuals.Icon(ViewModel.Editor.ModuleName), Mode=OneWay}"
+                                Fill="{x:Bind local:ModuleVisuals.Brush(ViewModel.Editor.ModuleName), Mode=OneWay}" />
+                        </Viewbox>
                     </Border>
                     <TextBlock
                         VerticalAlignment="Center"
