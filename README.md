@@ -38,6 +38,7 @@ dotnet run --project src/PocketCake -p:Platform=x64
 | `src/PocketCake.Core` | Platform-free protocol, data tables, decoders, frame builders and the NAM → .clo DSP. |
 | `src/PocketCake` | The WinUI 3 app: MIDI / BLE transports, app state, view models and views. |
 | `tests/PocketCake.Core.Tests` | xUnit tests, including DSP parity tests against SonicMaster goldens. |
+| `tools/make-icon.py` | Draws the app icon (`python tools/make-icon.py <prefix>`, needs Pillow). |
 
 Debug builds can replay real device captures without a pedal by setting `POCKETCAKE_DEMO=1`, and
 include a developer console for raw MIDI traffic.
