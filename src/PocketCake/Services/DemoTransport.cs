@@ -1,4 +1,3 @@
-#if DEBUG
 using PocketCake.Core.Device;
 using PocketCake.Core.Protocol;
 using PocketCake.Core.Tests;
@@ -6,8 +5,8 @@ using PocketCake.Core.Tests;
 namespace PocketCake.Services;
 
 /// <summary>
-/// Debug-only transport that replays real device captures (set POCKETCAKE_DEMO=1), so the UI can
-/// be exercised without a pedal: ACKs every write and answers the read requests with captured dumps.
+/// Demo-mode transport that replays real device captures, so the app can be tried (and Store-certified)
+/// without a pedal: ACKs every write and answers the read requests with captured dumps.
 /// </summary>
 public sealed class DemoTransport : ITransport
 {
@@ -62,4 +61,3 @@ public sealed class DemoTransport : ITransport
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
-#endif

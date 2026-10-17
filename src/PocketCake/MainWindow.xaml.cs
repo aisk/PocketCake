@@ -128,7 +128,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var disconnect = new MenuFlyoutItem { Text = "Disconnect", Icon = new FontIcon { Glyph = "" } };
+        var disconnect = new MenuFlyoutItem { Text = State.IsDemo ? "Exit demo" : "Disconnect", Icon = new FontIcon { Glyph = "" } };
         disconnect.Click += async (_, _) => await State.DisconnectAsync();
 
         var menu = new MenuFlyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };

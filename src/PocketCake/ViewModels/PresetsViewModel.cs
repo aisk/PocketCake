@@ -99,7 +99,7 @@ public sealed class PresetsViewModel : ObservableObject
         : "Couldn't read the preset";
 
     public string PlaceholderMessage =>
-        !_state.IsConnected ? "Connect a Pocket Master or Smart Box over USB or Bluetooth."
+        !_state.IsConnected ? "Connect a Pocket Master or Smart Box over USB or Bluetooth, or try the demo without one."
         : _state.CurrentPreset is null ? "Pick a preset from the list to start editing."
         : _state.IsLoading ? ""
         : "Select the preset again to retry.";

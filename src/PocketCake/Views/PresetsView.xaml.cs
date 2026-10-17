@@ -86,6 +86,8 @@ public sealed partial class PresetsView : Page
 
     private async void OnConnectClick(object sender, RoutedEventArgs e) => await MainWindow.Instance.ConnectAsync();
 
+    private async void OnDemoClick(object sender, RoutedEventArgs e) => await State.StartDemoAsync();
+
     // -------------------------------------------------------------------
     // Preset actions
     // -------------------------------------------------------------------

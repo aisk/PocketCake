@@ -263,13 +263,21 @@
                 Text="{x:Bind ViewModel.PlaceholderMessage, Mode=OneWay}"
                 TextAlignment="Center"
                 TextWrapping="Wrap" />
-            <Button
+            <StackPanel
                 Margin="0,8,0,0"
                 HorizontalAlignment="Center"
-                Click="OnConnectClick"
-                Content="Connect…"
-                Style="{StaticResource AccentButtonStyle}"
-                Visibility="{x:Bind ViewModel.ShowConnectButton, Mode=OneWay}" />
+                Orientation="Horizontal"
+                Spacing="8"
+                Visibility="{x:Bind ViewModel.ShowConnectButton, Mode=OneWay}">
+                <Button
+                    Click="OnConnectClick"
+                    Content="Connect…"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    Click="OnDemoClick"
+                    Content="Try demo"
+                    ToolTipService.ToolTip="Explore the editor with a virtual Smart Box, no pedal needed" />
+            </StackPanel>
         </StackPanel>
 
         <!-- Editor -->

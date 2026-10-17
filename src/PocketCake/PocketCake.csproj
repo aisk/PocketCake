@@ -30,8 +30,8 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
   </ItemGroup>
 
-  <!-- Debug-only demo mode replays the real device captures used by the tests. -->
-  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+  <!-- Demo mode replays the real device captures used by the tests. -->
+  <ItemGroup>
     <Compile Include="..\..\tests\PocketCake.Core.Tests\Captures.cs" Link="Services\Captures.cs" />
   </ItemGroup>
 

@@ -40,7 +40,8 @@ dotnet run --project src/PocketCake -p:Platform=x64
 | `tests/PocketCake.Core.Tests` | xUnit tests, including DSP parity tests against SonicMaster goldens. |
 | `tools/make-icon.py` | Draws the app icon (`python tools/make-icon.py <prefix>`, needs Pillow). |
 
-Debug builds can replay real device captures without a pedal by setting `POCKETCAKE_DEMO=1`, and
+**Try demo** (shown while no pedal is connected) replays real device captures as a virtual Smart Box, so
+the editor can be explored without hardware; `POCKETCAKE_DEMO=1` starts in demo mode. Debug builds also
 include a developer console for raw MIDI traffic.
 
 Settings are stored in `%LOCALAPPDATA%\PocketCake\settings.json`; unhandled exceptions are logged to

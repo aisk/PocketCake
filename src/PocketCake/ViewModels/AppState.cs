@@ -133,6 +133,10 @@ public sealed partial class AppState : INotifyPropertyChanged
     /// <summary>The model the effect pickers gate on: the manual override if set, else detection.</summary>
     public DeviceModel EffectiveModel => ModelOverride ?? DetectedModel;
 
+    private bool _isDemo;
+    /// <summary>True while the capture-replaying demo transport stands in for a pedal (no hardware needed).</summary>
+    public bool IsDemo { get => _isDemo; private set => Set(ref _isDemo, value); }
+
     private bool _isReconnecting;
     public bool IsReconnecting { get => _isReconnecting; private set => Set(ref _isReconnecting, value); }
 
@@ -221,34 +225,18 @@ public sealed partial class AppState : INotifyPropertyChanged
             return;
         }
 
-#if DEBUG
-        if (IsDemo)
+        if (Environment.GetEnvironmentVariable("POCKETCAKE_DEMO") == "1")
         {
-            await ConnectAndSyncAsync("Smart Box (demo)", "demo mode — replaying captures");
+            await StartDemoAsync();
             return;
         }
-#endif
 
         await AutoConnectOnStartupAsync();
     }
 
-    /// <summary>Debug-only: POCKETCAKE_DEMO=1 swaps in the capture-replaying transport.</summary>
-#if DEBUG
-    private static bool IsDemo => Environment.GetEnvironmentVariable("POCKETCAKE_DEMO") == "1";
-#else
-    private static bool IsDemo => false;
-#endif
-
     private DeviceService CreateService(TransportKind kind)
     {
-        ITransport transport = kind == TransportKind.Ble ? new BleTransport() : new MidiTransport();
-
-#if DEBUG
-        if (IsDemo)
-        {
-            transport = new DemoTransport();
-        }
-#endif
+        ITransport transport = IsDemo ? new DemoTransport() : kind == TransportKind.Ble ? new BleTransport() : new MidiTransport();
         var service = new DeviceService(transport);
 
         service.Inbound += m => _dispatcher.TryEnqueue(() =>
@@ -277,12 +265,13 @@ public sealed partial class AppState : INotifyPropertyChanged
     /// <summary>Switches transport: rebuilds the device service, starting disconnected.</summary>
     public void SetTransportKind(TransportKind kind)
     {
-        if (kind == TransportKind)
+        if (kind == TransportKind && !IsDemo)
         {
             return;
         }
 
         var old = _service;
+        IsDemo = false;
         _service = CreateService(kind);
         TransportKind = kind;
         IsConnected = false;
@@ -342,6 +331,20 @@ public sealed partial class AppState : INotifyPropertyChanged
         _ = RefreshNamesAsync();
 
         return true;
+    }
+
+    /// <summary>Enters demo mode: swaps in the capture-replaying transport and connects to a virtual Smart Box.</summary>
+    public async Task StartDemoAsync()
+    {
+        var old = _service;
+        _lastBleTarget = null;
+        IsDemo = true;
+        _service = CreateService(TransportKind.Usb);
+        TransportKind = TransportKind.Usb;
+        IsConnected = false;
+        _ = old.DisposeAsync().AsTask();
+
+        await ConnectAndSyncAsync("Smart Box (demo)", "demo mode — nothing is sent to a pedal");
     }
 
     /// <summary>Connects (from the device picker) and persists the intent for next-launch auto-connect.</summary>
@@ -430,6 +433,17 @@ public sealed partial class AppState : INotifyPropertyChanged
         IsConnected = false;
         DetectedModel = DeviceModel.Unknown;
         Status = "disconnected";
+
+        if (IsDemo)
+        {
+            // Leaving demo mode keeps the saved auto-connect profile; just restore a real transport.
+            var old = _service;
+            IsDemo = false;
+            _service = CreateService(TransportKind);
+            await old.DisposeAsync();
+            return;
+        }
+
         _settings.ClearAutoConnect();
         await _service.DisconnectAsync();
     }
