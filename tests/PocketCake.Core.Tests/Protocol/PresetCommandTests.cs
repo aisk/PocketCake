@@ -37,13 +37,6 @@ public sealed class PresetCommandFrameTests
     }
 
     [Fact]
-    public void TunerFrames()
-    {
-        Assert.Equal(new byte[] { 0x11, 0x15, 0x15, 0, 0, 0, 1, 0, 0, 0 }, Message(TunerFrame.Enter));
-        Assert.Equal(new byte[] { 0x11, 0x16, 0x16, 0, 0, 0 }, Message(TunerFrame.Quit));
-    }
-
-    [Fact]
     public void PresetIndexCountsUserThenFactory()
     {
         Assert.Equal(0, new PresetRef(PresetBank.User, 1).Index);
@@ -139,44 +132,5 @@ public sealed class PresetFileTests
     public void FileNameFollowsTheOfficialApp()
     {
         Assert.Equal("P03-Lead_1.prst", new PresetFile("Smart Box", Body("Lead/1")).FileName(new PresetRef(PresetBank.User, 3)));
-    }
-}
-
-public sealed class TunerReadingTests
-{
-    private static HardwareSyncEvent? Classify(params int[] data) =>
-        HardwareSyncEvent.Classify(InboundMessage.Classify(SysexWriteFrame.Build([0x12, 0x15, .. data])));
-
-    [Fact]
-    public void DecodesNoteAndSignedCents()
-    {
-        var r = Assert.IsType<TunerReading>(Classify(7, 0, 0xF6, 1));
-
-        Assert.Equal("E", r.Note);
-        Assert.Equal(-10, r.Cents);
-        Assert.False(r.InTune);
-    }
-
-    [Fact]
-    public void InTuneWithinThreeCents()
-    {
-        Assert.True(Assert.IsType<TunerReading>(Classify(0, 0, 3, 1)).InTune);
-        Assert.True(Assert.IsType<TunerReading>(Classify(0, 0, 0xFD, 1)).InTune);
-        Assert.False(Assert.IsType<TunerReading>(Classify(0, 0, 4, 1)).InTune);
-    }
-
-    [Fact]
-    public void InactiveReadingHasNoNote()
-    {
-        var r = Assert.IsType<TunerReading>(Classify(5, 0, 10, 0));
-
-        Assert.Null(r.Note);
-        Assert.False(r.InTune);
-    }
-
-    [Fact]
-    public void ShortPushIsIgnored()
-    {
-        Assert.Null(Classify(5, 0));
     }
 }

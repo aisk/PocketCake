@@ -18,7 +18,6 @@ multi-effects pedals, built with **WinUI 3** and a Fluent (Mica) interface.
 * User IR upload / rename / clear from `.wav`
 * **NAM → .clo** clone-profile conversion and upload
 * Preset JSON import / export
-* Chromatic tuner
 
 ## AI agents (MCP)
 

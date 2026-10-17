@@ -438,7 +438,6 @@ public sealed partial class AppState : INotifyPropertyChanged
     private async Task HandleConnectionDropAsync()
     {
         IsConnected = false;
-        ResetTuner();
         DetectedModel = DeviceModel.Unknown;
         var target = _lastBleTarget;
 
@@ -496,7 +495,6 @@ public sealed partial class AppState : INotifyPropertyChanged
     /// <summary>User-initiated disconnect: disarms auto-connect, then closes the transport.</summary>
     public async Task DisconnectAsync()
     {
-        await StopTunerAsync();
         _lastBleTarget = null;
         IsConnected = false;
         DetectedModel = DeviceModel.Unknown;
@@ -1393,10 +1391,6 @@ public sealed partial class AppState : INotifyPropertyChanged
                 }
 
                 PresetState = st with { FootswitchFs1Mask = fs1, FootswitchFs2Mask = fs2 };
-                break;
-
-            case TunerReading reading:
-                HandleTunerReading(reading);
                 break;
 
             case ModuleToggled mt when PresetState is { } st && Data?.Modules.NameOf(mt.Module) is { } name:

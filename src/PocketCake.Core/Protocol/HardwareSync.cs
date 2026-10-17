@@ -52,12 +52,6 @@ public abstract record HardwareSyncEvent
             return index < 0 || index >= all.Count ? null : new PresetSelected(all[index]);
         }
 
-        // Tuner push (cmd 0x15) while tuner mode is on.
-        if (hex.Length >= 30 && hex[26..30] == "0105")
-        {
-            return TunerReading.From(Hex.Logical(hex));
-        }
-
         // Full preset-state dump.
         if (hex.Length >= 30 && hex[22..30] == "01020401")
         {
@@ -79,30 +73,3 @@ public sealed record FootswitchChanged(int Module, bool IsFs2, bool IsOn) : Hard
 
 /// <summary>A single module enabled/disabled on the pedal.</summary>
 public sealed record ModuleToggled(int Module, bool IsOn) : HardwareSyncEvent;
-
-/// <summary>
-/// A tuner push: data is <c>note ? cents active</c>, note 0–11 counting from A and cents a signed byte
-/// (±50). An inactive reading (no signal) has a null <see cref="Note"/>.
-/// </summary>
-public sealed record TunerReading(string? Note, int Cents) : HardwareSyncEvent
-{
-    public static readonly IReadOnlyList<string> Notes = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"];
-
-    /// <summary>Within this many cents the official app shows the note as in tune.</summary>
-    public const int InTuneCents = 3;
-
-    public bool InTune => Note is not null && Math.Abs(Cents) <= InTuneCents;
-
-    internal static TunerReading? From(byte[] logical)
-    {
-        if (logical.Length < 10)
-        {
-            return null;
-        }
-
-        var note = logical[6];
-        var cents = Math.Clamp((int)(sbyte)logical[8], -50, 50);
-
-        return logical[9] == 0 || note >= Notes.Count ? new TunerReading(null, 0) : new TunerReading(Notes[note], cents);
-    }
-}

@@ -134,17 +134,6 @@ public static class PresetCommandFrame
 }
 
 /// <summary>
-/// Tuner mode: <c>11 15 | 0x15, 1</c> enters it and <c>11 16 | 0x16</c> leaves it (int32 LE each). While it is
-/// on, the pedal pushes <c>cmd 0x15</c> frames (see <see cref="TunerReading"/>).
-/// </summary>
-public static class TunerFrame
-{
-    public static string Enter { get; } = SysexWriteFrame.Build([0x11, 0x15, .. PresetCommandFrame.U32(0x15), .. PresetCommandFrame.U32(1)]);
-
-    public static string Quit { get; } = SysexWriteFrame.Build([0x11, 0x16, .. PresetCommandFrame.U32(0x16)]);
-}
-
-/// <summary>
 /// Footswitch write (register 0x4D): payload <c>11 4D &lt;switch&gt; &lt;module&gt; &lt;state&gt;</c>.
 /// A per-switch toggle, not a full-state write.
 /// </summary>
