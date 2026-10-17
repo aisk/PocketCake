@@ -100,6 +100,37 @@ public sealed class CommandLibraryTests
     }
 
     [Fact]
+    public void EffectSelectFramesAddressTheirModule()
+    {
+        foreach (var (moduleId, effects) in Cmd.EffectTypes)
+        {
+            foreach (var (effectId, frame) in effects)
+            {
+                // crc 01 00 0E | 11 47 | module u32 | slot u32 | algorithm id u32
+                var b = Hex.Logical(frame);
+
+                Assert.True(b.Length == 18, $"effect {effectId}: {b.Length} bytes");
+                Assert.Equal(Crc8Smbus.OfBytes(b.Skip(1).Select(x => (int)x)), b[0]);
+                Assert.Equal([0x01, 0x00, 0x0E, 0x11, 0x47], b[1..6]);
+                Assert.Equal(moduleId, BitConverter.ToInt32(b, 6));
+                Assert.Equal(moduleId, BitConverter.ToInt32(b, 10));
+            }
+        }
+    }
+
+    [Fact]
+    public void UserProfilesSelectCloneAlgorithms()
+    {
+        // User Profile n is algorithm 0x0F0000nn, the id a clone upload into slot n writes.
+        for (var i = 0; i < ModuleIds.UserSlotCount; i++)
+        {
+            var b = Hex.Logical(Cmd.EffectType(ModuleIds.CloneAmp, ModuleIds.UserProfileBase + i)!);
+
+            Assert.Equal(0x0F000000 | i, BitConverter.ToInt32(b, 14));
+        }
+    }
+
+    [Fact]
     public void GlobalCommandLookup()
     {
         Assert.NotNull(Cmd.GlobalCommand("globalVolume", 0));

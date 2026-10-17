@@ -35,6 +35,25 @@ public static class Hex
     public static int Byte(string hex, int charOffset) =>
         int.Parse(hex.AsSpan(charOffset, 2), NumberStyles.HexNumber);
 
+    /// <summary>
+    /// The logical bytes of a <c>[8080]F0 … F7</c> frame: every nibble pair after F0 joined into one byte,
+    /// starting with the CRC.
+    /// </summary>
+    public static byte[] Logical(string frameHex)
+    {
+        var h = frameHex.ToUpperInvariant();
+        var start = h.StartsWith("8080F0", StringComparison.Ordinal) ? 6 : h.StartsWith("F0", StringComparison.Ordinal) ? 2 : 0;
+        var end = h.EndsWith("F7", StringComparison.Ordinal) ? h.Length - 2 : h.Length;
+        var bytes = new byte[(end - start) / 4];
+
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            bytes[i] = (byte)((Byte(h, start + i * 4) << 4) | (Byte(h, start + i * 4 + 2) & 0x0F));
+        }
+
+        return bytes;
+    }
+
     /// <summary>Splits a hex string into two-char byte tokens.</summary>
     public static List<string> Tokens(string hex)
     {
