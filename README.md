@@ -9,6 +9,8 @@ multi-effects pedals, built with **WinUI 3** and a Fluent (Mica) interface.
 
 * Real-time, two-way editing over **USB-MIDI** or **Bluetooth LE MIDI** (with auto-reconnect)
 * Browse, search and load the Factory and User presets; save to any User slot
+* Rename, copy and factory-reset stored presets (right-click a preset)
+* `.prst` preset files, compatible with the official app
 * Signal chain view with drag-to-reorder and per-module on/off
 * Every effect parameter, effect type picker, FS1/FS2 footswitch assignment, DLY tap tempo
 * Preset volume, per-preset BPM and master volume
@@ -16,14 +18,15 @@ multi-effects pedals, built with **WinUI 3** and a Fluent (Mica) interface.
 * User IR upload / rename / clear from `.wav`
 * **NAM → .clo** clone-profile conversion and upload
 * Preset JSON import / export
+* Chromatic tuner
 
 ## AI agents (MCP)
 
 Turn on **Settings → Agent control (MCP)** and PocketCake serves an [MCP](https://modelcontextprotocol.io)
 endpoint on `http://127.0.0.1:47821/mcp` (loopback only; the port can be changed with `AgentPort` in
 `settings.json`). Agents like Claude can then browse presets, build tones and change settings in the running
-editor, and you watch the edits happen live. Saving a preset and writing User IR / clone slots still pop a
-confirmation in the app; factory reset is never exposed.
+editor, and you watch the edits happen live. Saving, renaming, copying or resetting a preset and writing User IR /
+clone slots still pop a confirmation in the app; factory reset is never exposed.
 
 Every request must carry a bearer token. To register PocketCake with Claude Code, copy the setup command from
 **Settings → Agent control** (**Copy setup command**) and run it; **Reset token** issues a new token, after

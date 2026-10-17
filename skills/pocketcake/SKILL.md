@@ -60,8 +60,10 @@ The pedal holds 50 User presets (P01–P50, writable) and 50 Factory presets (F0
 
 ## Flash writes
 
-`save_preset`, `upload_ir`, `upload_clone`, `rename_user_slot` and `clear_user_slot` overwrite storage
-on the pedal. Each pops a confirmation in PocketCake that the user must accept, so tell the user what
+`save_preset`, `rename_preset`, `copy_preset`, `reset_preset`, `upload_ir`, `upload_clone`,
+`rename_user_slot` and `clear_user_slot` overwrite storage on the pedal. `rename_preset` changes only the
+name; `copy_preset` and `reset_preset` (P03 gets factory F03) replace the whole preset, and when the target
+is the preset being played they reload it, discarding unsaved edits. Each pops a confirmation in PocketCake that the user must accept, so tell the user what
 you are about to write (slot, name, what gets replaced) and wait for their go-ahead before calling one.
 If they decline in the app, the tool fails with "declined"; leave the slot as it is. Save only into a slot
 the user agreed to (`list_presets bank=user` shows what each holds).
