@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
     {
         ["presets"] = typeof(PresetsView),
         ["slots"] = typeof(SlotsView),
+        ["tuner"] = typeof(TunerView),
         ["settings"] = typeof(SettingsView),
 #if DEBUG
         ["console"] = typeof(DevConsole),
@@ -34,6 +35,7 @@ public sealed partial class MainWindow : Window
         Settings = new SettingsViewModel(State, Agent, settings);
         Presets = new PresetsViewModel(State);
         Slots = new SlotsViewModel(State);
+        Tuner = new TunerViewModel(State);
 
         InitializeComponent();
 
@@ -67,7 +69,11 @@ public sealed partial class MainWindow : Window
             await DebugSnapshotAsync();
 #endif
         };
-        Closed += async (_, _) => await Agent.StopAsync();
+        Closed += async (_, _) =>
+        {
+            await State.StopTunerAsync();
+            await Agent.StopAsync();
+        };
     }
 
     public static MainWindow Instance { get; private set; } = null!;
@@ -81,6 +87,8 @@ public sealed partial class MainWindow : Window
     public PresetsViewModel Presets { get; }
 
     public SlotsViewModel Slots { get; }
+
+    public TunerViewModel Tuner { get; }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);

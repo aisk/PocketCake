@@ -66,6 +66,11 @@
                         <FontIcon Glyph="&#xE8F1;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Tuner" Tag="tuner">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEC4F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
                 <NavigationViewItem x:Name="ConsoleItem" Content="Developer console" Tag="console" Visibility="Collapsed">
