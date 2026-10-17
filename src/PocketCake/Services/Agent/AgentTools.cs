@@ -761,6 +761,11 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             result["expFsTarget2"] = targets[Math.Clamp(g.ExpFsTarget2, 0, targets.Count - 1)];
         }
 
+        if (g.FirmwareVersion is { } firmware)
+        {
+            result["firmwareVersion"] = firmware;
+        }
+
         return result;
     }
 
