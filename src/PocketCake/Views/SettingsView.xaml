@@ -84,37 +84,39 @@
                             </StackPanel>
                         </local:SettingsRow>
 
-                        <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="USB audio" />
-                        <local:SettingsRow Description="Dry or wet signal on the USB audio output" Glyph="&#xECF0;" Header="Mode">
-                            <ComboBox MinWidth="160" SelectedIndex="{x:Bind ViewModel.UsbMode, Mode=TwoWay}">
-                                <x:String>Dry</x:String>
-                                <x:String>Wet</x:String>
-                            </ComboBox>
-                        </local:SettingsRow>
-                        <local:SettingsRow Glyph="&#xE9F3;" Header="Re-amp">
-                            <ToggleSwitch IsOn="{x:Bind ViewModel.Reamp, Mode=TwoWay}" />
-                        </local:SettingsRow>
+                        <StackPanel Visibility="{x:Bind ViewModel.ShowSmartBoxSettings, Mode=OneWay}">
+                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="USB audio" />
+                            <local:SettingsRow Description="Dry or wet signal on the USB audio output" Glyph="&#xECF0;" Header="Mode">
+                                <ComboBox MinWidth="160" SelectedIndex="{x:Bind ViewModel.UsbMode, Mode=TwoWay}">
+                                    <x:String>Dry</x:String>
+                                    <x:String>Wet</x:String>
+                                </ComboBox>
+                            </local:SettingsRow>
+                            <local:SettingsRow Glyph="&#xE9F3;" Header="Re-amp">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.Reamp, Mode=TwoWay}" />
+                            </local:SettingsRow>
 
-                        <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="EXP / FS jack" />
-                        <local:SettingsRow Description="What is plugged into the expression jack" Glyph="&#xEA86;" Header="Type">
-                            <ComboBox MinWidth="160" SelectedIndex="{x:Bind ViewModel.ExpFsType, Mode=TwoWay}">
-                                <x:String>Expression pedal</x:String>
-                                <x:String>Single footswitch</x:String>
-                                <x:String>Dual footswitch</x:String>
-                            </ComboBox>
-                        </local:SettingsRow>
-                        <local:SettingsRow Glyph="&#xE8EC;" Header="{x:Bind ViewModel.Target1Header, Mode=OneWay}">
-                            <ComboBox
-                                MinWidth="160"
-                                ItemsSource="{x:Bind ViewModel.TargetOptions, Mode=OneWay}"
-                                SelectedIndex="{x:Bind ViewModel.Target1, Mode=TwoWay}" />
-                        </local:SettingsRow>
-                        <local:SettingsRow Glyph="&#xE8EC;" Header="Function 2" Visibility="{x:Bind ViewModel.HasTarget2, Mode=OneWay}">
-                            <ComboBox
-                                MinWidth="160"
-                                ItemsSource="{x:Bind ViewModel.TargetOptions, Mode=OneWay}"
-                                SelectedIndex="{x:Bind ViewModel.Target2, Mode=TwoWay}" />
-                        </local:SettingsRow>
+                            <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="EXP / FS jack" />
+                            <local:SettingsRow Description="What is plugged into the expression jack" Glyph="&#xEA86;" Header="Type">
+                                <ComboBox MinWidth="160" SelectedIndex="{x:Bind ViewModel.ExpFsType, Mode=TwoWay}">
+                                    <x:String>Expression pedal</x:String>
+                                    <x:String>Single footswitch</x:String>
+                                    <x:String>Dual footswitch</x:String>
+                                </ComboBox>
+                            </local:SettingsRow>
+                            <local:SettingsRow Glyph="&#xE8EC;" Header="{x:Bind ViewModel.Target1Header, Mode=OneWay}">
+                                <ComboBox
+                                    MinWidth="160"
+                                    ItemsSource="{x:Bind ViewModel.TargetOptions, Mode=OneWay}"
+                                    SelectedIndex="{x:Bind ViewModel.Target1, Mode=TwoWay}" />
+                            </local:SettingsRow>
+                            <local:SettingsRow Glyph="&#xE8EC;" Header="Function 2" Visibility="{x:Bind ViewModel.HasTarget2, Mode=OneWay}">
+                                <ComboBox
+                                    MinWidth="160"
+                                    ItemsSource="{x:Bind ViewModel.TargetOptions, Mode=OneWay}"
+                                    SelectedIndex="{x:Bind ViewModel.Target2, Mode=TwoWay}" />
+                            </local:SettingsRow>
+                        </StackPanel>
 
                         <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Display &amp; power" />
                         <local:SettingsRow Glyph="&#xE706;" Header="Backlight">
@@ -127,13 +129,17 @@
                                 <TextBlock Style="{StaticResource RowValueStyle}" Text="{x:Bind ViewModel.Backlight, Mode=OneWay}" />
                             </StackPanel>
                         </local:SettingsRow>
-                        <local:SettingsRow Glyph="&#xE8BE;" Header="ECO mode">
+                        <local:SettingsRow Glyph="&#xE8BE;" Header="ECO mode" Visibility="{x:Bind ViewModel.ShowSmartBoxSettings, Mode=OneWay}">
                             <ToggleSwitch IsOn="{x:Bind ViewModel.Eco, Mode=TwoWay}" />
                         </local:SettingsRow>
-                        <local:SettingsRow Glyph="&#xE7E8;" Header="Power-off confirmation">
+                        <local:SettingsRow
+                            Description="{x:Bind ViewModel.PowerConfirmDescription, Mode=OneWay}"
+                            Glyph="&#xE7E8;"
+                            Header="{x:Bind ViewModel.PowerConfirmHeader, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.ShowPowerConfirm, Mode=OneWay}">
                             <ToggleSwitch IsOn="{x:Bind ViewModel.PowerConfirm, Mode=TwoWay}" />
                         </local:SettingsRow>
-                        <local:SettingsRow Glyph="&#xE83F;" Header="Battery only">
+                        <local:SettingsRow Glyph="&#xE83F;" Header="Battery only" Visibility="{x:Bind ViewModel.ShowSmartBoxSettings, Mode=OneWay}">
                             <ToggleSwitch IsOn="{x:Bind ViewModel.BattOnly, Mode=TwoWay}" />
                         </local:SettingsRow>
 

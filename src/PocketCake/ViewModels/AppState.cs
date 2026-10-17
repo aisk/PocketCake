@@ -1039,6 +1039,11 @@ public sealed partial class AppState : INotifyPropertyChanged
             return NotReady;
         }
 
+        if (isClone && !FirmwareGates.SupportsClone(EffectiveModel, GlobalSettings?.FirmwareVersion))
+        {
+            return Fail("clone mode needs Pocket Master firmware 1.1.0 or newer");
+        }
+
         var sent = await SendEditAsync(isClone ? data.Commands.AmpClone : data.Commands.AmpFactory);
 
         if (!sent.IsOk)

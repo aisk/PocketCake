@@ -69,6 +69,43 @@ public static class ModuleIds
     public static int Physical(int id) => id == CloneAmp ? Amp : id;
 }
 
+/// <summary>
+/// Per-model feature gates the official app applies. Only release firmware ("V…") is gated; a beta
+/// ("B…") or unknown version fails open.
+/// </summary>
+public static class FirmwareGates
+{
+    /// <summary>"V1.3.3" → (1, 3, 3, release: true); null if unparsable.</summary>
+    public static (int Major, int Minor, int Patch, bool Release)? Parse(string? version)
+    {
+        if (version is not { Length: > 1 } || version[0] is not ('V' or 'B'))
+        {
+            return null;
+        }
+
+        var parts = version[1..].Split('.');
+
+        return parts.Length == 3 && int.TryParse(parts[0], out var a) && int.TryParse(parts[1], out var b) && int.TryParse(parts[2], out var c)
+            ? (a, b, c, version[0] == 'V')
+            : null;
+    }
+
+    private static bool Below(string? version, int major, int minor) =>
+        Parse(version) is { Release: true } v && (v.Major, v.Minor).CompareTo((major, minor)) < 0;
+
+    /// <summary>Sound clone (User Profiles) needs Pocket Master firmware 1.1.0.</summary>
+    public static bool SupportsClone(DeviceModel model, string? firmware) => !(model == DeviceModel.PocketMaster && Below(firmware, 1, 1));
+
+    /// <summary>The boot anti-touch setting needs Pocket Master firmware 1.3.0.</summary>
+    public static bool SupportsBootProtection(DeviceModel model, string? firmware) => !(model == DeviceModel.PocketMaster && Below(firmware, 1, 3));
+
+    /// <summary>
+    /// USB mode, re-amp, ECO, EXP/FS and battery-only are Smart Box settings; the official app hides them
+    /// on the Pocket Master. (Backlight stays: it works on the Pocket Master too.)
+    /// </summary>
+    public static bool HasSmartBoxSettings(DeviceModel model) => model != DeviceModel.PocketMaster;
+}
+
 /// <summary>Which hardware footswitch a module is assigned to, if any.</summary>
 public enum FootswitchAssignment { None, Fs1, Fs2 }
 

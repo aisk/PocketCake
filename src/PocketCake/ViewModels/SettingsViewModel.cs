@@ -81,6 +81,23 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool BattOnly { get => G?.BattOnly == 1; set => Setting("battOnly", value ? 1 : 0, G?.BattOnly); }
 
+    /// <summary>USB mode, re-amp, EXP/FS, ECO and battery-only exist on the Smart Box only.</summary>
+    public bool ShowSmartBoxSettings => FirmwareGates.HasSmartBoxSettings(_state.EffectiveModel);
+
+    public bool ShowPowerConfirm => FirmwareGates.SupportsBootProtection(_state.EffectiveModel, G?.FirmwareVersion);
+
+    /// <summary>The same boot setting is named differently per model.</summary>
+    public string PowerConfirmHeader => _state.EffectiveModel switch
+    {
+        DeviceModel.PocketMaster => "Anti-touch protection",
+        DeviceModel.SmartBox => "Power-on confirmation",
+        _ => "Power-on confirmation / anti-touch",
+    };
+
+    public string PowerConfirmDescription => _state.EffectiveModel == DeviceModel.PocketMaster
+        ? "Guards the switches against accidental presses when powering on"
+        : "Asks for a confirming press before the pedal powers on";
+
     /// <summary>0 = auto-detect, 1 = Pocket Master, 2 = Smart Box.</summary>
     public int ModelIndex
     {

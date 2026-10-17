@@ -456,13 +456,21 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "set_global_setting")]
     [Description(
-        "Sets one device-wide setting: masterVolume (0-100); inputLevel, fxRecLevel, btRecLevel, monitorLevel (dB); usbMode (dry/wet); " +
-        "reamp, eco, powerConfirm, battOnly (true/false); backlight (0-100); expFsType (exp/single/dual); expFsTarget, expFsTarget2 " +
-        "(a target name from get_global_settings' targetOptions).")]
+        "Sets one device-wide setting: masterVolume (0-100); inputLevel, fxRecLevel, btRecLevel, monitorLevel (dB); backlight (0-100); " +
+        "powerConfirm (true/false; anti-touch protection on the Pocket Master). Smart Box only: usbMode (dry/wet); reamp, eco, battOnly " +
+        "(true/false); expFsType (exp/single/dual); expFsTarget, expFsTarget2 (a target name from get_global_settings' targetOptions). " +
+        "Only the settings get_global_settings reports exist on the connected model.")]
     public Task<Dictionary<string, object>> SetGlobalSetting(string name, JsonElement value) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var g = state.GlobalSettings ?? throw new McpException("global settings not read yet; retry shortly");
+
+        var known = Globals();
+
+        if (!known.ContainsKey(name) && !(name == "expFsTarget2" && known.ContainsKey("expFsType")))
+        {
+            throw new McpException($"'{name}' is not a setting of the {state.Data?.Capabilities.DisplayName(state.EffectiveModel) ?? "pedal"}");
+        }
 
         switch (name)
         {
@@ -745,20 +753,29 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             ["fxRecLevel"] = g.FxRecLevel,
             ["btRecLevel"] = g.BtRecLevel,
             ["monitorLevel"] = g.MonitorLevel,
-            ["usbMode"] = g.Mode == 1 ? "wet" : "dry",
-            ["reamp"] = g.Reamp == 1,
             ["backlight"] = g.Backlight,
-            ["eco"] = g.Eco == 1,
-            ["powerConfirm"] = g.PowerConfirm == 1,
-            ["battOnly"] = g.BattOnly == 1,
-            ["expFsType"] = ExpFsTypes[Math.Clamp(g.ExpFsType, 0, 2)],
-            ["expFsTarget"] = targets[Math.Clamp(g.ExpFsTarget, 0, targets.Count - 1)],
-            ["targetOptions"] = targets,
         };
 
-        if (g.ExpFsType == 2)
+        if (FirmwareGates.SupportsBootProtection(state.EffectiveModel, g.FirmwareVersion))
         {
-            result["expFsTarget2"] = targets[Math.Clamp(g.ExpFsTarget2, 0, targets.Count - 1)];
+            // Anti-touch protection on the Pocket Master, power-on confirmation on the Smart Box.
+            result["powerConfirm"] = g.PowerConfirm == 1;
+        }
+
+        if (FirmwareGates.HasSmartBoxSettings(state.EffectiveModel))
+        {
+            result["usbMode"] = g.Mode == 1 ? "wet" : "dry";
+            result["reamp"] = g.Reamp == 1;
+            result["eco"] = g.Eco == 1;
+            result["battOnly"] = g.BattOnly == 1;
+            result["expFsType"] = ExpFsTypes[Math.Clamp(g.ExpFsType, 0, 2)];
+            result["expFsTarget"] = targets[Math.Clamp(g.ExpFsTarget, 0, targets.Count - 1)];
+            result["targetOptions"] = targets;
+
+            if (g.ExpFsType == 2)
+            {
+                result["expFsTarget2"] = targets[Math.Clamp(g.ExpFsTarget2, 0, targets.Count - 1)];
+            }
         }
 
         if (g.FirmwareVersion is { } firmware)

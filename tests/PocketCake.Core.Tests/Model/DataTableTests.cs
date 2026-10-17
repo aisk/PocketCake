@@ -249,6 +249,40 @@ public sealed class DeviceCapabilitiesTests
     }
 }
 
+public sealed class FirmwareGatesTests
+{
+    [Fact]
+    public void ParsesReleaseAndBetaVersions()
+    {
+        Assert.Equal((1, 3, 3, true), FirmwareGates.Parse("V1.3.3"));
+        Assert.Equal((1, 0, 6, false), FirmwareGates.Parse("B1.0.6"));
+        Assert.Null(FirmwareGates.Parse("1.3.3"));
+        Assert.Null(FirmwareGates.Parse(null));
+    }
+
+    [Fact]
+    public void GatesOnlyOldPocketMasterReleases()
+    {
+        Assert.False(FirmwareGates.SupportsClone(DeviceModel.PocketMaster, "V1.0.9"));
+        Assert.True(FirmwareGates.SupportsClone(DeviceModel.PocketMaster, "V1.1.0"));
+        Assert.True(FirmwareGates.SupportsClone(DeviceModel.PocketMaster, "B1.0.9"));
+        Assert.True(FirmwareGates.SupportsClone(DeviceModel.SmartBox, "V1.0.6"));
+
+        Assert.False(FirmwareGates.SupportsBootProtection(DeviceModel.PocketMaster, "V1.2.9"));
+        Assert.True(FirmwareGates.SupportsBootProtection(DeviceModel.PocketMaster, "V1.3.3"));
+        Assert.True(FirmwareGates.SupportsBootProtection(DeviceModel.PocketMaster, null));
+        Assert.True(FirmwareGates.SupportsBootProtection(DeviceModel.SmartBox, "V1.0.0"));
+    }
+
+    [Fact]
+    public void SmartBoxSettingsHideOnlyOnThePocketMaster()
+    {
+        Assert.False(FirmwareGates.HasSmartBoxSettings(DeviceModel.PocketMaster));
+        Assert.True(FirmwareGates.HasSmartBoxSettings(DeviceModel.SmartBox));
+        Assert.True(FirmwareGates.HasSmartBoxSettings(DeviceModel.Unknown));
+    }
+}
+
 public sealed class EffectLibraryTests
 {
     private static EffectLibrary Lib => TestData.Assets.Effects;
