@@ -47,6 +47,6 @@ Settings are stored in `%LOCALAPPDATA%\PocketCake\settings.json`; unhandled exce
 
 ## License
 
-MIT. Code ported from SonicMaster (MIT).
+MIT. Copyright (c) 2026 An Long; portions ported from SonicMaster, copyright (c) 2026 Andrii Klaptsov.
 
 > Not affiliated with, or endorsed by, Sonicake.
