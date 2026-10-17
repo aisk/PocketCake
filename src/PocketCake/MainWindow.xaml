@@ -74,6 +74,7 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
+            <Frame x:Name="ContentFrame" />
         </NavigationView>
 
         <Grid Grid.Row="2" Padding="16,6" ColumnSpacing="8">

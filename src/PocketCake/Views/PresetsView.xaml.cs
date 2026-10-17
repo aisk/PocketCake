@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using PocketCake.Core.Model;
 using PocketCake.ViewModels;
 using Windows.ApplicationModel.DataTransfer;
@@ -26,10 +27,11 @@ public sealed partial class ParameterTemplateSelector : DataTemplateSelector
 }
 
 /// <summary>Browse and load presets, then edit the loaded one: fields, signal chain, modules.</summary>
-public sealed partial class PresetsView : UserControl
+public sealed partial class PresetsView : Page
 {
     public PresetsView()
     {
+        NavigationCacheMode = NavigationCacheMode.Required;
         ViewModel = MainWindow.Instance.Presets;
         InitializeComponent();
 

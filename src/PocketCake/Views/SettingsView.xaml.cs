@@ -2,15 +2,17 @@ using System.Globalization;
 using System.Reflection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using PocketCake.ViewModels;
 
 namespace PocketCake.Views;
 
 /// <summary>The pedal's global settings, plus app options.</summary>
-public sealed partial class SettingsView : UserControl
+public sealed partial class SettingsView : Page
 {
     public SettingsView()
     {
+        NavigationCacheMode = NavigationCacheMode.Required;
         ViewModel = MainWindow.Instance.Settings;
         InitializeComponent();
         Loaded += (_, _) => _ = MainWindow.Instance.State.RefreshGlobalSettingsAsync();

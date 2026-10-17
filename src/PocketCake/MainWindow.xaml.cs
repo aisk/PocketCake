@@ -14,8 +14,15 @@ namespace PocketCake;
 /// <summary>The shell: title bar (master volume, connection), navigation between the pages, status line.</summary>
 public sealed partial class MainWindow : Window
 {
-    private readonly Dictionary<string, Func<UIElement>> _pageFactories;
-    private readonly Dictionary<string, UIElement> _pages = [];
+    private static readonly Dictionary<string, Type> PageTypes = new()
+    {
+        ["presets"] = typeof(PresetsView),
+        ["slots"] = typeof(SlotsView),
+        ["settings"] = typeof(SettingsView),
+#if DEBUG
+        ["console"] = typeof(DevConsole),
+#endif
+    };
 
     public MainWindow()
     {
@@ -24,16 +31,6 @@ public sealed partial class MainWindow : Window
         Settings = new SettingsViewModel(State);
         Presets = new PresetsViewModel(State);
         Slots = new SlotsViewModel(State);
-
-        _pageFactories = new()
-        {
-            ["presets"] = () => new PresetsView(),
-            ["slots"] = () => new SlotsView(),
-            ["settings"] = () => new SettingsView(),
-#if DEBUG
-            ["console"] = () => new DevConsole(State),
-#endif
-        };
 
         InitializeComponent();
 
@@ -85,18 +82,14 @@ public sealed partial class MainWindow : Window
     {
         var tag = args.IsSettingsSelected ? "settings" : (args.SelectedItem as NavigationViewItem)?.Tag as string;
 
-        if (tag is null || !_pageFactories.TryGetValue(tag, out var create))
+        if (tag is null || !PageTypes.TryGetValue(tag, out var type) || ContentFrame.CurrentSourcePageType == type)
         {
             return;
         }
 
-        if (!_pages.TryGetValue(tag, out var page))
-        {
-            page = create();
-            _pages[tag] = page;
-        }
-
-        Nav.Content = page;
+        // Pages cache themselves (NavigationCacheMode.Required); there is no back navigation.
+        ContentFrame.Navigate(type, null, args.RecommendedNavigationTransitionInfo);
+        ContentFrame.BackStack.Clear();
     }
 
     private void OnPaneToggleRequested(TitleBar sender, object args) => Nav.IsPaneOpen = !Nav.IsPaneOpen;

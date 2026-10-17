@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<UserControl
+<Page
     x:Class="PocketCake.Views.SlotsView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:PocketCake.Views"
     xmlns:vm="using:PocketCake.ViewModels">
 
-    <UserControl.Resources>
+    <Page.Resources>
         <DataTemplate x:Key="SlotTemplate" x:DataType="vm:SlotItem">
             <Border Margin="0,0,0,4" Style="{StaticResource CardStyle}">
                 <Grid ColumnSpacing="14">
@@ -55,7 +55,7 @@
                 </Grid>
             </Border>
         </DataTemplate>
-    </UserControl.Resources>
+    </Page.Resources>
 
     <ScrollViewer>
         <Grid>
@@ -87,4 +87,4 @@
             </StackPanel>
         </Grid>
     </ScrollViewer>
-</UserControl>
+</Page>

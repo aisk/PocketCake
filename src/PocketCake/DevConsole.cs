@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using PocketCake.Core.Protocol;
 using PocketCake.ViewModels;
 
@@ -10,7 +11,7 @@ namespace PocketCake;
 /// Developer / protocol-RE console (Debug builds): send a read-only query or a raw
 /// frame, watch classified inbound messages and raw RX/TX traffic, optionally capture to a file.
 /// </summary>
-public sealed class DevConsole : UserControl
+public sealed partial class DevConsole : Page
 {
     private const string GlobalSettingsQuery = "8080F00B0900010000000201020100F7";
     private const int MaxLines = 2000;
@@ -23,9 +24,10 @@ public sealed class DevConsole : UserControl
     private readonly ToggleSwitch _capture;
     private readonly ToggleSwitch _raw;
 
-    public DevConsole(AppState state)
+    public DevConsole()
     {
-        _state = state;
+        NavigationCacheMode = NavigationCacheMode.Required;
+        var state = _state = MainWindow.Instance.State;
 
         var query = new Button { Content = "Query global settings" };
         query.Click += async (_, _) => await Send(GlobalSettingsQuery);

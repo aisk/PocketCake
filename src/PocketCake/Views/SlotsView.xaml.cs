@@ -1,14 +1,16 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using PocketCake.ViewModels;
 
 namespace PocketCake.Views;
 
 /// <summary>Load, rename and clear the pedal's User-IR and User-Profile slots.</summary>
-public sealed partial class SlotsView : UserControl
+public sealed partial class SlotsView : Page
 {
     public SlotsView()
     {
+        NavigationCacheMode = NavigationCacheMode.Required;
         ViewModel = MainWindow.Instance.Slots;
         InitializeComponent();
     }
