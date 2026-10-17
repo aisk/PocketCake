@@ -234,7 +234,7 @@ public static class Dialogs
     private static string SlotTitle(int slot, bool isClone) => $"{(isClone ? "User Profile" : "User IR")} {slot + 1}";
 
     /// <summary>A non-dismissable progress dialog tracking the shared status text and upload progress.</summary>
-    private static Action ShowProgress(string title)
+    public static Action ShowProgress(string title)
     {
         var state = State;
         var status = Body(state.Status ?? "Preparing…");

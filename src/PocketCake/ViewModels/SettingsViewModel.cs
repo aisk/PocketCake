@@ -1,9 +1,11 @@
 using PocketCake.Core.Model;
+using PocketCake.Services;
+using PocketCake.Services.Agent;
 
 namespace PocketCake.ViewModels;
 
 /// <summary>
-/// Device-global settings plus the master volume. Getters read <see cref="AppState.GlobalSettings"/>;
+/// Device-global settings plus the master volume, and the app's agent-control switch. Getters read <see cref="AppState.GlobalSettings"/>;
 /// setters write to the pedal only when the value differs, so bindings re-reading state never echo.
 /// </summary>
 public sealed class SettingsViewModel : ObservableObject
@@ -17,10 +19,15 @@ public sealed class SettingsViewModel : ObservableObject
     ];
 
     private readonly AppState _state;
+    private readonly AgentServer _agent;
+    private readonly AppSettings _settings;
+    private string? _agentError;
 
-    public SettingsViewModel(AppState state)
+    public SettingsViewModel(AppState state, AgentServer agent, AppSettings settings)
     {
         _state = state;
+        _agent = agent;
+        _settings = settings;
         state.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(AppState.GlobalSettings) or nameof(AppState.GlobalVolume) or nameof(AppState.IsLoading)
@@ -139,4 +146,43 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     public Task FactoryResetAsync() => _state.FactoryResetAsync();
+
+    /// <summary>Whether AI agents can drive the editor over the local MCP endpoint.</summary>
+    public bool AgentControl
+    {
+        get => _agent.IsRunning;
+        set
+        {
+            if (value != _agent.IsRunning)
+            {
+                _settings.AgentControl = value;
+                _ = ApplyAgentAsync(value);
+            }
+        }
+    }
+
+    public string AgentDescription => _agentError ?? (_agent.IsRunning
+        ? $"MCP endpoint: {_agent.Url}"
+        : "Let Claude and other MCP agents read and edit presets. Saves and uploads still ask you first.");
+
+    public string AgentCommand => $"claude mcp add --transport http pocketcake {_agent.Url}";
+
+    public Task StartAgentIfEnabledAsync() => _settings.AgentControl ? ApplyAgentAsync(true) : Task.CompletedTask;
+
+    private async Task ApplyAgentAsync(bool enable)
+    {
+        _agentError = null;
+
+        try
+        {
+            await (enable ? _agent.StartAsync() : _agent.StopAsync());
+        }
+        catch (Exception e)
+        {
+            _agentError = $"Couldn't start on port {_agent.Port}: {e.Message}";
+        }
+
+        OnPropertyChanged(nameof(AgentControl));
+        OnPropertyChanged(nameof(AgentDescription));
+    }
 }

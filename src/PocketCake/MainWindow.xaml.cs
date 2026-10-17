@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.Windows.Storage.Pickers;
 using PocketCake.Core.Model;
 using PocketCake.Services;
+using PocketCake.Services.Agent;
 using PocketCake.ViewModels;
 using PocketCake.Views;
 
@@ -27,8 +28,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         Instance = this;
-        State = new AppState(DispatcherQueue, AppSettings.Load());
-        Settings = new SettingsViewModel(State);
+        var settings = AppSettings.Load();
+        State = new AppState(DispatcherQueue, settings);
+        Agent = new AgentServer(State, DispatcherQueue, settings.AgentPort);
+        Settings = new SettingsViewModel(State, Agent, settings);
         Presets = new PresetsViewModel(State);
         Slots = new SlotsViewModel(State);
 
@@ -59,15 +62,19 @@ public sealed partial class MainWindow : Window
         Root.Loaded += async (_, _) =>
         {
             await State.InitializeAsync();
+            await Settings.StartAgentIfEnabledAsync();
 #if DEBUG
             await DebugSnapshotAsync();
 #endif
         };
+        Closed += async (_, _) => await Agent.StopAsync();
     }
 
     public static MainWindow Instance { get; private set; } = null!;
 
     public AppState State { get; }
+
+    public AgentServer Agent { get; }
 
     public SettingsViewModel Settings { get; }
 

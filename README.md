@@ -17,6 +17,22 @@ multi-effects pedals, built with **WinUI 3** and a Fluent (Mica) interface.
 * **NAM → .clo** clone-profile conversion and upload
 * Preset JSON import / export
 
+## AI agents (MCP)
+
+Turn on **Settings → Agent control (MCP)** and PocketCake serves an [MCP](https://modelcontextprotocol.io)
+endpoint on `http://127.0.0.1:47821/mcp` (loopback only; the port can be changed with `AgentPort` in
+`settings.json`). Agents like Claude can then browse presets, build tones and change settings in the running
+editor, and you watch the edits happen live. Saving a preset and writing User IR / clone slots still pop a
+confirmation in the app; factory reset is never exposed.
+
+```powershell
+claude mcp add --transport http pocketcake http://127.0.0.1:47821/mcp
+```
+
+The server sends [`skills/pocketcake/SKILL.md`](skills/pocketcake/SKILL.md) to the agent as its instructions
+and offers it as the `pocketcake_guide` prompt. For Claude Code you can also install it as a skill by copying
+that folder into `~/.claude/skills/`. Clients that only speak stdio can bridge with `npx mcp-remote <url>`.
+
 ## Acknowledgements
 
 The device protocol, data tables and NAM conversion are based on

@@ -24,6 +24,14 @@ public sealed partial class SettingsView : Page
 
     public static string Db(double value) => $"{value.ToString("+0;-0;0", CultureInfo.InvariantCulture)} dB";
 
+    private void OnCopyAgentCommandClick(object sender, RoutedEventArgs e)
+    {
+        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        package.SetText(ViewModel.AgentCommand);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+        MainWindow.Instance.State.ReportStatus("setup command copied");
+    }
+
     private async void OnFactoryResetClick(object sender, RoutedEventArgs e)
     {
         if (await Dialogs.ConfirmAsync(XamlRoot, "Reset to factory settings?",

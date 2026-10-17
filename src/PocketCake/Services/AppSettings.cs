@@ -7,7 +7,7 @@ namespace PocketCake.Services;
 public sealed record ConnectionProfile(TransportKind Transport, string? BleName);
 
 /// <summary>
-/// Persists the user's last connection intent and the device-model override in
+/// Persists the user's last connection intent, the device-model override and the agent-control switch in
 /// <c>%LOCALAPPDATA%\PocketCake\settings.json</c>. Auto-connect is armed by a successful
 /// connect and disarmed by a manual disconnect; an unexpected drop writes nothing.
 /// </summary>
@@ -24,6 +24,8 @@ public sealed class AppSettings
         public string? Transport { get; set; }
         public string? BleName { get; set; }
         public string? ModelOverride { get; set; }
+        public bool AgentControl { get; set; }
+        public int? AgentPort { get; set; }
     }
 
     public static AppSettings Load()
@@ -97,6 +99,20 @@ public sealed class AppSettings
             Save();
         }
     }
+
+    /// <summary>Whether the local MCP endpoint for AI agents is enabled.</summary>
+    public bool AgentControl
+    {
+        get => _data.AgentControl;
+        set
+        {
+            _data.AgentControl = value;
+            Save();
+        }
+    }
+
+    /// <summary>The loopback port the MCP endpoint listens on (settings.json only).</summary>
+    public int AgentPort => _data.AgentPort is > 0 and < 65536 ? _data.AgentPort.Value : 47821;
 
     private void Save()
     {

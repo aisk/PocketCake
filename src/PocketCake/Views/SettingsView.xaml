@@ -152,6 +152,16 @@
                         <x:String>Smart Box</x:String>
                     </ComboBox>
                 </local:SettingsRow>
+                <local:SettingsRow Description="{x:Bind ViewModel.AgentDescription, Mode=OneWay}" Glyph="&#xE99A;" Header="Agent control (MCP)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            Click="OnCopyAgentCommandClick"
+                            Content="Copy setup command"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.AgentCommand}"
+                            Visibility="{x:Bind ViewModel.AgentControl, Mode=OneWay}" />
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.AgentControl, Mode=TwoWay}" />
+                    </StackPanel>
+                </local:SettingsRow>
                 <local:SettingsRow Description="Native editor for Sonicake Pocket Master and Smart Box" Glyph="&#xE946;" Header="About">
                     <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Version}" />
                 </local:SettingsRow>

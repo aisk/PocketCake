@@ -28,6 +28,12 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+  </ItemGroup>
+
+  <!-- The agent guide doubles as the MCP server instructions. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\skills\pocketcake\SKILL.md" LogicalName="PocketCake.SKILL.md" />
   </ItemGroup>
 
   <!-- Demo mode replays the real device captures used by the tests. -->
