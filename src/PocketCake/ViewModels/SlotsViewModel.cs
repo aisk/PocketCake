@@ -1,3 +1,5 @@
+using PocketCake.Core.Model;
+
 namespace PocketCake.ViewModels;
 
 /// <summary>The pedal's five User-IR and five User-Profile (clone) slots.</summary>
@@ -18,9 +20,9 @@ public sealed class SlotsViewModel : ObservableObject
         Refresh();
     }
 
-    public IReadOnlyList<SlotItem> IrSlots { get; } = Enumerable.Range(0, 5).Select(i => new SlotItem(i, isClone: false)).ToList();
+    public IReadOnlyList<SlotItem> IrSlots { get; } = Enumerable.Range(0, ModuleIds.UserSlotCount).Select(i => new SlotItem(i, isClone: false)).ToList();
 
-    public IReadOnlyList<SlotItem> CloneSlots { get; } = Enumerable.Range(0, 5).Select(i => new SlotItem(i, isClone: true)).ToList();
+    public IReadOnlyList<SlotItem> CloneSlots { get; } = Enumerable.Range(0, ModuleIds.UserSlotCount).Select(i => new SlotItem(i, isClone: true)).ToList();
 
     public bool IsConnected => _state.IsConnected;
 
@@ -30,7 +32,7 @@ public sealed class SlotsViewModel : ObservableObject
     {
         foreach (var slot in IrSlots.Concat(CloneSlots))
         {
-            slot.Name = _state.IsConnected && _state.UserNames.TryGetValue((slot.IsClone ? 901 : 416) + slot.Index, out var name) ? name : "—";
+            slot.Name = _state.IsConnected && _state.UserNames.TryGetValue(ModuleIds.UserSlotBase(slot.IsClone) + slot.Index, out var name) ? name : "—";
             slot.IsEnabled = _state.IsConnected && !_state.IsLoading;
         }
 

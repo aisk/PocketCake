@@ -26,8 +26,6 @@ public sealed class BleTransport : ITransport
 
     public event Action<bool>? ConnectionChanged;
 
-    public bool HasConnectionEvents => true;
-
     /// <summary>Scans for BLE-MIDI devices for <paramref name="duration"/>, sorted by signal strength.</summary>
     public static async Task<List<ScannedBle>> ScanAsync(TimeSpan duration, CancellationToken ct = default)
     {
@@ -128,6 +126,8 @@ public sealed class BleTransport : ITransport
         var device = await BluetoothLEDevice.FromBluetoothAddressAsync(match.Address)
             ?? throw new InvalidOperationException("Could not open the BLE device");
 
+        GattDeviceService? service = null;
+
         try
         {
             var services = await device.GetGattServicesForUuidAsync(MidiServiceUuid, BluetoothCacheMode.Uncached);
@@ -137,12 +137,11 @@ public sealed class BleTransport : ITransport
                 throw new InvalidOperationException($"BLE-MIDI service not found ({services.Status})");
             }
 
-            var service = services.Services[0];
+            service = services.Services[0];
             var chars = await service.GetCharacteristicsForUuidAsync(MidiCharUuid, BluetoothCacheMode.Uncached);
 
             if (chars.Status != GattCommunicationStatus.Success || chars.Characteristics.Count == 0)
             {
-                service.Dispose();
                 throw new InvalidOperationException($"BLE-MIDI characteristic not found ({chars.Status})");
             }
 
@@ -151,7 +150,6 @@ public sealed class BleTransport : ITransport
 
             if (status != GattCommunicationStatus.Success)
             {
-                service.Dispose();
                 throw new InvalidOperationException($"Could not subscribe to BLE-MIDI notifications ({status})");
             }
 
@@ -164,6 +162,8 @@ public sealed class BleTransport : ITransport
         }
         catch
         {
+            // Covers the explicit failures above and any GATT call that throws.
+            service?.Dispose();
             device.Dispose();
             throw;
         }

@@ -15,6 +15,29 @@ public sealed class ImportException(string message, bool isFormatError = false) 
     public bool IsFormatError { get; } = isFormatError;
 }
 
+/// <summary>How an <see cref="AppState"/> device operation ended.</summary>
+public enum OpOutcome
+{
+    Ok,
+
+    /// <summary>Refused without touching the pedal: another device operation holds the gate.</summary>
+    Busy,
+
+    Failed,
+}
+
+/// <summary>The result of an <see cref="AppState"/> device operation; <see cref="Message"/> explains a failure.</summary>
+public readonly record struct OpResult(OpOutcome Outcome, string? Message = null)
+{
+    public static OpResult Ok => new(OpOutcome.Ok);
+
+    public static OpResult Busy => new(OpOutcome.Busy, "PocketCake is busy with another device operation");
+
+    public static OpResult Fail(string message) => new(OpOutcome.Failed, message);
+
+    public bool IsOk => Outcome == OpOutcome.Ok;
+}
+
 /// <summary>
 /// The app's single source of truth: connection, the decoded current preset, names, global
 /// settings, plus every device action. All members are touched on the UI thread only; inbound
@@ -25,22 +48,7 @@ public sealed partial class AppState : INotifyPropertyChanged
     public const int PresetBpmMin = 40;
     public const int PresetBpmMax = 260;
 
-    /// <summary>Address (a0, a1) of each device-global setting written via a dumpRecord frame.</summary>
-    private static readonly Dictionary<string, (int A0, int A1)> GlobalSettingAddress = new()
-    {
-        ["mode"] = (0x04, 0x04),
-        ["reamp"] = (0x06, 0x04),
-        ["expFsType"] = (0x01, 0x05),
-        ["backlight"] = (0x03, 0x02),
-        ["eco"] = (0x04, 0x02),
-        ["powerConfirm"] = (0x05, 0x02),
-        ["battOnly"] = (0x06, 0x02),
-    };
-
-    private static readonly double[] CloBiquad =
-    [
-        0.9963043928146362, -1.9926087856292725, 0.9963043928146362, -1.9925950765609741, 0.9926224946975708,
-    ];
+    private static readonly OpResult NotReady = OpResult.Fail("data still loading…");
 
     private readonly DispatcherQueue _dispatcher;
     private readonly AppSettings _settings;
@@ -68,13 +76,7 @@ public sealed partial class AppState : INotifyPropertyChanged
         _modifiedDebounce = dispatcher.CreateTimer();
         _modifiedDebounce.Interval = TimeSpan.FromMilliseconds(300);
         _modifiedDebounce.IsRepeating = false;
-        _modifiedDebounce.Tick += async (_, _) =>
-        {
-            if (!IsLoading)
-            {
-                await RefreshDecodedStateAsync();
-            }
-        };
+        _modifiedDebounce.Tick += async (_, _) => await RefreshDecodedStateInBackgroundAsync();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -159,7 +161,10 @@ public sealed partial class AppState : INotifyPropertyChanged
     public double? ImportProgress { get => _importProgress; private set => Set(ref _importProgress, value); }
 
     private bool _isLoading;
-    /// <summary>True while a load / save / read is in flight; serializes device round-trips.</summary>
+    /// <summary>
+    /// True while a load / save / read / upload is in flight: the operation gate (see
+    /// <see cref="RunExclusiveAsync"/>). Edits are refused while it is held.
+    /// </summary>
     public bool IsLoading { get => _isLoading; private set => Set(ref _isLoading, value); }
 
     private bool _isModified;
@@ -206,6 +211,38 @@ public sealed partial class AppState : INotifyPropertyChanged
     }
 
     private void OnPropertyChanged(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    /// <summary>
+    /// The operation gate: runs <paramref name="body"/> unless another device operation holds it, in
+    /// which case it returns <see cref="OpResult.Busy"/> without waiting. The check and the set happen
+    /// on the UI thread with no await in between, so two callers can't both get in. Bodies call the
+    /// gate-free "Core" variants, never another gated entry point.
+    /// </summary>
+    private async Task<OpResult> RunExclusiveAsync(Func<Task<OpResult>> body)
+    {
+        if (IsLoading)
+        {
+            return OpResult.Busy;
+        }
+
+        IsLoading = true;
+
+        try
+        {
+            return await body();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>Shows <paramref name="status"/> and returns it as a failure.</summary>
+    private OpResult Fail(string status)
+    {
+        Status = status;
+        return OpResult.Fail(status);
+    }
 
     /// <summary>Display name for effect <paramref name="id"/>, preferring a live-decoded user slot name.</summary>
     public string EffectDisplayName(int id) =>
@@ -321,13 +358,14 @@ public sealed partial class AppState : INotifyPropertyChanged
         DetectedModel = Data?.Capabilities.Detect(resolvedName, kind) ?? DeviceModel.Unknown;
         Status = statusOnSuccess;
 
-        // Enter the edit session (020300) first, exactly as the official tool does on connect.
-        if (!IsLoading)
+        // The post-connect sync reads take the operation gate and are skipped while another operation
+        // holds it. Enter the edit session (020300) first, exactly as the official tool does on connect.
+        await RunExclusiveAsync(async () =>
         {
             await _service.EnterEditSessionAsync();
-        }
+            return await RefreshGlobalSettingsCoreAsync();
+        });
 
-        await RefreshGlobalSettingsAsync();
         _ = RefreshNamesAsync();
 
         return true;
@@ -459,12 +497,12 @@ public sealed partial class AppState : INotifyPropertyChanged
 
         if (profile.Transport == TransportKind.Ble)
         {
-            _lastBleTarget = profile.BleName;
+            _lastBleTarget = profile.Target;
         }
 
         try
         {
-            await ConnectAndSyncAsync(profile.BleName, "connected");
+            await ConnectAndSyncAsync(profile.Target, "connected");
         }
         catch
         {
@@ -510,6 +548,16 @@ public sealed partial class AppState : INotifyPropertyChanged
             DetectedModel = DeviceModel.Unknown;
             ConnectedDeviceName = null;
             Status = "connection lost — click Connect";
+
+            // Release the dead ports. Not AppState.DisconnectAsync: that would disarm auto-connect.
+            try
+            {
+                await _service.DisconnectAsync();
+            }
+            catch
+            {
+                // best-effort
+            }
         }
     }
 
@@ -518,57 +566,60 @@ public sealed partial class AppState : INotifyPropertyChanged
     // ---------------------------------------------------------------------
 
     /// <summary>Loads <paramref name="preset"/> onto the device and decodes its content.</summary>
-    public async Task LoadPresetAsync(PresetRef preset)
+    public Task<OpResult> LoadPresetAsync(PresetRef preset) => RunExclusiveAsync(async () =>
     {
-        if (IsLoading)
-        {
-            return;
-        }
-
         if (Data is not { } data)
         {
-            Status = "data still loading…";
-            return;
+            return Fail("data still loading…");
         }
 
         if (data.Commands.PresetSelect(preset.Bank, preset.Number) is not { } frame)
         {
-            Status = $"no command for {preset.Label}";
-            return;
+            return Fail($"no command for {preset.Label}");
         }
-
-        IsLoading = true;
 
         try
         {
-            if (await _service.SendAndAwaitAckAsync(frame))
+            if (!await _service.SendAndAwaitAckAsync(frame))
             {
-                CurrentPreset = preset;
-                IsModified = false;
-                Status = $"loaded {preset.Label}";
-                await RefreshDecodedStateAsync();
+                return Fail($"{preset.Label}: no ACK (timeout)");
             }
-            else
-            {
-                Status = $"{preset.Label}: no ACK (timeout)";
-            }
+
+            CurrentPreset = preset;
+            IsModified = false;
+            Status = $"loaded {preset.Label}";
+            await RefreshDecodedStateCoreAsync();
+
+            return OpResult.Ok;
         }
         catch (Exception e)
         {
-            Status = $"{preset.Label}: send failed — {e.Message}";
+            return Fail($"{preset.Label}: send failed — {e.Message}");
         }
-        finally
+    });
+
+    /// <summary>Re-reads the current preset state from the device (best-effort; clears on failure). Skipped while busy.</summary>
+    public Task<OpResult> RefreshDecodedStateAsync() => RunExclusiveAsync(async () =>
+        await RefreshDecodedStateCoreAsync() ? OpResult.Ok : OpResult.Fail("couldn't read the preset"));
+
+    /// <summary>
+    /// Re-read after a device-originated change: skipped while the gate is held, but doesn't take it.
+    /// The pedal answers every edit with a "modified" flag, so holding the gate here would disable the
+    /// editor (and drop slider values) after each edit.
+    /// </summary>
+    private async Task RefreshDecodedStateInBackgroundAsync()
+    {
+        if (!IsLoading)
         {
-            IsLoading = false;
+            await RefreshDecodedStateCoreAsync();
         }
     }
 
-    /// <summary>Re-reads the current preset state from the device (best-effort; clears on failure).</summary>
-    public async Task RefreshDecodedStateAsync()
+    private async Task<bool> RefreshDecodedStateCoreAsync()
     {
         if (Data is not { } data)
         {
-            return;
+            return false;
         }
 
         try
@@ -584,14 +635,17 @@ public sealed partial class AppState : INotifyPropertyChanged
             if (dump is null)
             {
                 ClearDecoded();
-                return;
+                return false;
             }
 
             ApplyDecodedDump(data, dump);
+
+            return true;
         }
         catch
         {
             ClearDecoded();
+            return false;
         }
     }
 
@@ -610,22 +664,21 @@ public sealed partial class AppState : INotifyPropertyChanged
         SelectedEffects = selected;
         Parameters = new ParameterValuesDecoder(data.Parameters).Decode(dumpHex, selected, data.Effects);
 
-        // In clone mode the AMP editor target is module 9, else 3.
+        // In clone mode the AMP editor target is the clone amp.
         if (PresetState is { } st)
         {
-            if (st.IsCloneMode && SelectedModule == 3)
-            {
-                SelectedModule = 9;
-            }
-            else if (!st.IsCloneMode && SelectedModule == 9)
-            {
-                SelectedModule = 3;
-            }
+            SelectedModule = ModuleIds.EditTarget(ModuleIds.Physical(SelectedModule), st.IsCloneMode);
         }
     }
 
-    /// <summary>Fetches preset, User-Profile and User-IR names in the background (best-effort).</summary>
-    public async Task RefreshNamesAsync()
+    /// <summary>Fetches preset, User-Profile and User-IR names in the background (best-effort). Skipped while busy.</summary>
+    public Task<OpResult> RefreshNamesAsync() => RunExclusiveAsync(async () =>
+    {
+        await RefreshNamesCoreAsync();
+        return OpResult.Ok;
+    });
+
+    private async Task RefreshNamesCoreAsync()
     {
         if (Data is not { } data)
         {
@@ -655,8 +708,8 @@ public sealed partial class AppState : INotifyPropertyChanged
             }
         }
 
-        await RefreshUserNamesAsync(DeviceService.CloneNamesRequest, "User Profile", 901);
-        await RefreshUserNamesAsync(DeviceService.IrNamesRequest, "User IR", 416);
+        await RefreshUserNamesAsync(DeviceService.CloneNamesRequest, "User Profile", ModuleIds.UserProfileBase);
+        await RefreshUserNamesAsync(DeviceService.IrNamesRequest, "User IR", ModuleIds.UserIrBase);
     }
 
     private async Task RefreshUserNamesAsync(string request, string prefix, int baseId)
@@ -695,51 +748,67 @@ public sealed partial class AppState : INotifyPropertyChanged
     // Edits
     // ---------------------------------------------------------------------
 
-    private async Task<bool> TrySendEditAsync(string frame)
+    // Edits are single fire-and-forget frames: they are refused (Busy) while the operation gate is
+    // held but don't hold it themselves, so a fast slider drag never drops a value.
+
+    private async Task<OpResult> SendEditAsync(string frame)
     {
         try
         {
             await SendAsync(frame);
-            return true;
+            return OpResult.Ok;
         }
         catch (Exception e)
         {
-            Status = $"edit failed: {e.Message}";
-            return false;
+            return Fail($"edit failed: {e.Message}");
         }
     }
 
     /// <summary>Changes a module's effect (<c>0407</c>), then re-reads state (the new effect has different params).</summary>
-    public async Task SetEffectTypeAsync(int moduleId, int effectId)
+    public Task<OpResult> SetEffectTypeAsync(int moduleId, int effectId) => RunExclusiveAsync(async () =>
     {
-        if (IsLoading || Data?.Commands.EffectType(moduleId, effectId) is not { } frame)
+        if (Data?.Commands.EffectType(moduleId, effectId) is not { } frame)
         {
-            return;
+            return OpResult.Fail($"effect {effectId} has no command for module {moduleId}");
         }
 
-        if (!await TrySendEditAsync(frame))
+        var sent = await SendEditAsync(frame);
+
+        if (!sent.IsOk)
         {
-            return;
+            return sent;
         }
 
         IsModified = true;
         await Task.Delay(300);
-        await RefreshDecodedStateAsync();
-    }
+        await RefreshDecodedStateCoreAsync();
+
+        return OpResult.Ok;
+    });
 
     /// <summary>Turns a module on/off (<c>0409</c>), optimistically updating the module state.</summary>
-    public async Task ToggleModuleAsync(int moduleId, bool isOn)
+    public async Task<OpResult> ToggleModuleAsync(int moduleId, bool isOn)
     {
-        if (IsLoading || Data is not { } data)
+        if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
         }
 
-        var frame = isOn ? data.Commands.ModuleOn(moduleId) : data.Commands.ModuleOff(moduleId);
-
-        if (frame is null || !await TrySendEditAsync(frame))
+        if (Data is not { } data)
         {
-            return;
+            return NotReady;
+        }
+
+        if ((isOn ? data.Commands.ModuleOn(moduleId) : data.Commands.ModuleOff(moduleId)) is not { } frame)
+        {
+            return OpResult.Fail($"module {moduleId} has no on/off command");
+        }
+
+        var sent = await SendEditAsync(frame);
+
+        if (!sent.IsOk)
+        {
+            return sent;
         }
 
         if (PresetState is { } st && data.Modules.NameOf(moduleId) is { } name)
@@ -748,20 +817,26 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
 
         IsModified = true;
+
+        return OpResult.Ok;
     }
 
     /// <summary>Reorders the signal chain (<c>0404</c>) to <paramref name="groups"/>, optimistically.</summary>
-    public async Task ReorderChainAsync(List<List<string>> groups)
+    public async Task<OpResult> ReorderChainAsync(List<List<string>> groups)
     {
-        if (IsLoading || Data is not { } data)
+        if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
+        }
+
+        if (Data is not { } data)
+        {
+            return NotReady;
         }
 
         if (data.Commands.ChainOrderCommand(ChainOrder.Key(groups)) is not { } frame)
         {
-            Status = "reorder unavailable";
-            return;
+            return Fail("reorder unavailable");
         }
 
         // Apply before sending so a rapid follow-up drag builds on the new order.
@@ -771,15 +846,21 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
 
         IsModified = true;
-        await TrySendEditAsync(frame);
+
+        return await SendEditAsync(frame);
     }
 
-    /// <summary>Sets a parameter (<c>0408</c>); no-op if the value has no command in the table.</summary>
-    public async Task SetParameterAsync(int moduleId, int algId, double value)
+    /// <summary>Sets a parameter (<c>0408</c>); fails if the value has no command in the table.</summary>
+    public async Task<OpResult> SetParameterAsync(int moduleId, int algId, double value)
     {
-        if (IsLoading || Data?.Commands.ParameterCommand(moduleId, algId, SliderMath.ParamValueKey(value)) is not { } frame)
+        if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
+        }
+
+        if (Data?.Commands.ParameterCommand(moduleId, algId, SliderMath.ParamValueKey(value)) is not { } frame)
+        {
+            return OpResult.Fail($"parameter {algId} has no command for value {SliderMath.Format(value)}");
         }
 
         var ps = new Dictionary<int, Dictionary<int, double>>(Parameters);
@@ -787,21 +868,37 @@ public sealed partial class AppState : INotifyPropertyChanged
         module[algId] = value;
         ps[moduleId] = module;
 
-        if (!await TrySendEditAsync(frame))
+        var sent = await SendEditAsync(frame);
+
+        if (!sent.IsOk)
         {
-            return;
+            return sent;
         }
 
         Parameters = ps;
         IsModified = true;
+
+        return OpResult.Ok;
     }
 
     /// <summary>Sets the preset volume (<c>0402</c>, 0–100).</summary>
-    public async Task SetPresetVolumeAsync(int value)
+    public async Task<OpResult> SetPresetVolumeAsync(int value)
     {
-        if (IsLoading || Data?.Commands.GlobalCommand("presetVolume", value) is not { } frame || !await TrySendEditAsync(frame))
+        if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
+        }
+
+        if (Data?.Commands.GlobalCommand("presetVolume", value) is not { } frame)
+        {
+            return OpResult.Fail($"preset volume {value} has no command");
+        }
+
+        var sent = await SendEditAsync(frame);
+
+        if (!sent.IsOk)
+        {
+            return sent;
         }
 
         if (PresetState is { } st)
@@ -810,21 +907,24 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
 
         IsModified = true;
+
+        return OpResult.Ok;
     }
 
     /// <summary>Sets the preset BPM (synthesized <c>0402</c> field 2 frame).</summary>
-    public async Task SetPresetBpmAsync(int value)
+    public async Task<OpResult> SetPresetBpmAsync(int value)
     {
         if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
         }
 
         var bpm = Math.Clamp(value, PresetBpmMin, PresetBpmMax);
+        var sent = await SendEditAsync(PresetFieldFrame.Build(PresetFieldFrame.BpmField, bpm));
 
-        if (!await TrySendEditAsync(PresetFieldFrame.Build(PresetFieldFrame.BpmField, bpm)))
+        if (!sent.IsOk)
         {
-            return;
+            return sent;
         }
 
         if (PresetState is { } st)
@@ -833,17 +933,19 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
 
         IsModified = true;
+
+        return OpResult.Ok;
     }
 
     /// <summary>
     /// Assigns a module to a footswitch: turn the chosen switch on, then clear whichever other
     /// switch the module was on. A re-tap of the current assignment is a no-op.
     /// </summary>
-    public async Task SetModuleFootswitchAsync(int moduleId, FootswitchAssignment assignment)
+    public async Task<OpResult> SetModuleFootswitchAsync(int moduleId, FootswitchAssignment assignment)
     {
         if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
         }
 
         var bit = 1 << moduleId;
@@ -854,7 +956,7 @@ public sealed partial class AppState : INotifyPropertyChanged
 
         if (assignment == Footswitch.AssignmentOf(fs1Mask, fs2Mask, moduleId))
         {
-            return;
+            return OpResult.Ok;
         }
 
         var frames = new List<string>();
@@ -881,9 +983,11 @@ public sealed partial class AppState : INotifyPropertyChanged
 
         foreach (var frame in frames)
         {
-            if (!await TrySendEditAsync(frame))
+            var sent = await SendEditAsync(frame);
+
+            if (!sent.IsOk)
             {
-                return;
+                return sent;
             }
         }
 
@@ -895,19 +999,23 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
 
         IsModified = true;
+
+        return OpResult.Ok;
     }
 
     /// <summary>Switches the amp slot between factory amp models and Clone mode, then re-reads state.</summary>
-    public async Task SetAmpModeAsync(bool isClone)
+    public Task<OpResult> SetAmpModeAsync(bool isClone) => RunExclusiveAsync(async () =>
     {
-        if (IsLoading || Data is not { } data)
+        if (Data is not { } data)
         {
-            return;
+            return NotReady;
         }
 
-        if (!await TrySendEditAsync(isClone ? data.Commands.AmpClone : data.Commands.AmpFactory))
+        var sent = await SendEditAsync(isClone ? data.Commands.AmpClone : data.Commands.AmpFactory);
+
+        if (!sent.IsOk)
         {
-            return;
+            return sent;
         }
 
         if (PresetState is { } st)
@@ -922,32 +1030,36 @@ public sealed partial class AppState : INotifyPropertyChanged
 
         IsModified = true;
         await Task.Delay(400);
-        await RefreshDecodedStateAsync();
-        SelectedModule = isClone ? 9 : 3;
-    }
+        await RefreshDecodedStateCoreAsync();
+        SelectedModule = ModuleIds.EditTarget(ModuleIds.Amp, isClone);
+
+        return OpResult.Ok;
+    });
 
     /// <summary>
     /// Saves the live edits to User slot <paramref name="slot"/> (1–50) with <paramref name="name"/>
     /// (<c>040A</c>). A cross-slot "Save As" also re-selects the target on the device.
     /// </summary>
-    public async Task<bool> SavePresetAsync(int slot, string name)
+    public Task<OpResult> SavePresetAsync(int slot, string name) => RunExclusiveAsync(async () =>
     {
-        if (IsLoading || Data is not { } data || slot is < 1 or > 50)
+        if (Data is not { } data)
         {
-            return false;
+            return NotReady;
+        }
+
+        if (slot is < 1 or > 50)
+        {
+            return OpResult.Fail("slot must be 1-50");
         }
 
         var frame = new SavePresetFrame(new PresetNameCodec(data.Characters)).Build(name, slot);
         var sameSlot = CurrentPreset is { Bank: PresetBank.User } cur && cur.Number == slot;
 
-        IsLoading = true;
-
         try
         {
             if (!await _service.SendAndAwaitAckAsync(frame))
             {
-                Status = "save: no ACK (timeout)";
-                return false;
+                return Fail("save: no ACK (timeout)");
             }
 
             if (!sameSlot && data.Commands.PresetSelect(PresetBank.User, slot) is { } select)
@@ -956,7 +1068,7 @@ public sealed partial class AppState : INotifyPropertyChanged
                 await Task.Delay(600);
                 await _service.SendAndAwaitAckAsync(select);
                 await Task.Delay(300);
-                await RefreshDecodedStateAsync();
+                await RefreshDecodedStateCoreAsync();
             }
 
             var saved = new PresetRef(PresetBank.User, slot);
@@ -965,36 +1077,38 @@ public sealed partial class AppState : INotifyPropertyChanged
             IsModified = false;
             Status = $"saved \"{name}\" to P{slot:D2}";
 
-            return true;
+            return OpResult.Ok;
         }
         catch (Exception e)
         {
-            Status = $"save failed: {e.Message}";
-            return false;
+            return Fail($"save failed: {e.Message}");
         }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
+    });
 
     // ---------------------------------------------------------------------
     // Global settings
     // ---------------------------------------------------------------------
 
     /// <summary>Sets the device-global master volume (<c>0101</c>). Not a preset edit.</summary>
-    public async Task SetGlobalVolumeAsync(int value)
+    public async Task<OpResult> SetGlobalVolumeAsync(int value)
     {
         if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
         }
 
         _globalEditAt = DateTime.Now;
 
-        if (Data?.Commands.GlobalCommand("globalVolume", value) is not { } frame || !await TrySendEditAsync(frame))
+        if (Data?.Commands.GlobalCommand("globalVolume", value) is not { } frame)
         {
-            return;
+            return OpResult.Fail($"master volume {value} has no command");
+        }
+
+        var sent = await SendEditAsync(frame);
+
+        if (!sent.IsOk)
+        {
+            return sent;
         }
 
         GlobalVolume = value;
@@ -1003,6 +1117,8 @@ public sealed partial class AppState : INotifyPropertyChanged
         {
             GlobalSettings = g with { GlobalVolume = value };
         }
+
+        return OpResult.Ok;
     }
 
     /// <summary>Re-applies the fields the settings dump doesn't carry, so a re-read doesn't reset them.</summary>
@@ -1017,16 +1133,11 @@ public sealed partial class AppState : INotifyPropertyChanged
                 ExpFsTarget2 = prev.ExpFsTarget2,
             };
 
-    /// <summary>Reads + decodes the device-global settings (holds the loading flag meanwhile).</summary>
-    public async Task RefreshGlobalSettingsAsync()
+    /// <summary>Reads + decodes the device-global settings under the operation gate. Skipped while busy.</summary>
+    public Task<OpResult> RefreshGlobalSettingsAsync() => RunExclusiveAsync(RefreshGlobalSettingsCoreAsync);
+
+    private async Task<OpResult> RefreshGlobalSettingsCoreAsync()
     {
-        if (IsLoading)
-        {
-            return;
-        }
-
-        IsLoading = true;
-
         try
         {
             if (await _service.RequestGlobalSettingsAsync() is { } dump && GlobalSettingsDecoder.Decode(dump) is { } g)
@@ -1034,16 +1145,16 @@ public sealed partial class AppState : INotifyPropertyChanged
                 var merged = WithUnreadable(g, GlobalSettings);
                 GlobalSettings = merged;
                 GlobalVolume = merged.GlobalVolume;
+
+                return OpResult.Ok;
             }
         }
         catch
         {
             // best-effort
         }
-        finally
-        {
-            IsLoading = false;
-        }
+
+        return OpResult.Fail("couldn't read the global settings");
     }
 
     private bool IsEditingGlobalRecently() =>
@@ -1088,18 +1199,25 @@ public sealed partial class AppState : INotifyPropertyChanged
     }
 
     /// <summary>Sets a device-global dB level (a <c>globalCommands</c> key such as "inputLevel").</summary>
-    public async Task SetGlobalLevelAsync(string name, int value)
+    public async Task<OpResult> SetGlobalLevelAsync(string name, int value)
     {
         if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
         }
 
         _globalEditAt = DateTime.Now;
 
-        if (Data?.Commands.GlobalCommand(name, value) is not { } frame || !await TrySendEditAsync(frame))
+        if (Data?.Commands.GlobalCommand(name, value) is not { } frame)
         {
-            return;
+            return OpResult.Fail($"{name} {value} has no command");
+        }
+
+        var sent = await SendEditAsync(frame);
+
+        if (!sent.IsOk)
+        {
+            return sent;
         }
 
         if (GlobalSettings is { } g)
@@ -1113,21 +1231,30 @@ public sealed partial class AppState : INotifyPropertyChanged
                 _ => g,
             };
         }
+
+        return OpResult.Ok;
     }
 
     /// <summary>Writes a device-global setting via a synthesized dumpRecord frame.</summary>
-    public async Task SetGlobalSettingAsync(string name, int value)
+    public async Task<OpResult> SetGlobalSettingAsync(string name, int value)
     {
-        if (IsLoading || !GlobalSettingAddress.TryGetValue(name, out var addr))
+        if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
+        }
+
+        if (!GlobalSettingRegisters.DumpRecordAddress.TryGetValue(name, out var addr))
+        {
+            return OpResult.Fail($"unknown setting '{name}'");
         }
 
         _globalEditAt = DateTime.Now;
 
-        if (!await TrySendEditAsync(GlobalSettingWriter.DumpRecord(addr.A0, addr.A1, value)))
+        var sent = await SendEditAsync(GlobalSettingWriter.DumpRecord(addr.A0, addr.A1, value));
+
+        if (!sent.IsOk)
         {
-            return;
+            return sent;
         }
 
         if (GlobalSettings is { } g)
@@ -1144,34 +1271,35 @@ public sealed partial class AppState : INotifyPropertyChanged
                 _ => g,
             };
         }
+
+        return OpResult.Ok;
     }
 
     /// <summary>Writes an EXP/FS Target; the current type picks the register/sub.</summary>
-    public async Task SetExpFsTargetAsync(int value, bool isFunc2)
+    public async Task<OpResult> SetExpFsTargetAsync(int value, bool isFunc2)
     {
         if (IsLoading)
         {
-            return;
+            return OpResult.Busy;
         }
 
-        var (reg, sub) = (GlobalSettings?.ExpFsType ?? 0) switch
-        {
-            0 => (0x17, 0x01), // EXP
-            1 => (0x16, 0x00), // SingleFS
-            _ => isFunc2 ? (0x16, 0x04) : (0x16, 0x02), // DualFS Func 1 / Func 2
-        };
+        var (reg, sub) = GlobalSettingRegisters.ExpFsTarget(GlobalSettings?.ExpFsType ?? 0, isFunc2);
 
         _globalEditAt = DateTime.Now;
 
-        if (!await TrySendEditAsync(GlobalSettingWriter.RegisterWrite(reg, sub, value)))
+        var sent = await SendEditAsync(GlobalSettingWriter.RegisterWrite(reg, sub, value));
+
+        if (!sent.IsOk)
         {
-            return;
+            return sent;
         }
 
         if (GlobalSettings is { } g)
         {
             GlobalSettings = isFunc2 ? g with { ExpFsTarget2 = value } : g with { ExpFsTarget = value };
         }
+
+        return OpResult.Ok;
     }
 
     /// <summary>Sends Factory Reset; the pedal ACKs, reboots and drops the link.</summary>
@@ -1217,11 +1345,7 @@ public sealed partial class AppState : INotifyPropertyChanged
                 PresetTab = sel.Preset.Bank;
                 IsModified = false;
                 _modifiedDebounce.Stop();
-
-                if (!IsLoading)
-                {
-                    _ = RefreshDecodedStateAsync();
-                }
+                _ = RefreshDecodedStateInBackgroundAsync();
 
                 break;
 
@@ -1287,11 +1411,11 @@ public sealed partial class AppState : INotifyPropertyChanged
     public void ReportStatus(string status) => Status = status;
 
     /// <summary>Imports a preset JSON and pushes it to the pedal (live state only — Save persists it).</summary>
-    public async Task ImportPresetAsync(string jsonText)
+    public Task<OpResult> ImportPresetAsync(string jsonText) => RunExclusiveAsync(async () =>
     {
         if (Data is not { } data)
         {
-            return;
+            return NotReady;
         }
 
         ImportedPreset imported;
@@ -1302,16 +1426,9 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
         catch (Exception e)
         {
-            Status = $"import failed: {e.Message}";
-            return;
+            return Fail($"import failed: {e.Message}");
         }
 
-        if (IsLoading)
-        {
-            return;
-        }
-
-        IsLoading = true;
         var c = data.Commands;
         var skipped = 0;
 
@@ -1354,21 +1471,19 @@ public sealed partial class AppState : INotifyPropertyChanged
                 }
             }
 
-            await RefreshDecodedStateAsync();
+            await RefreshDecodedStateCoreAsync();
             IsModified = true;
 
             var warn = imported.Warnings.Count == 0 ? "" : $" ({imported.Warnings.Count} warning(s))";
             Status = $"imported{(skipped > 0 ? $", {skipped} skipped" : "")}{warn}";
+
+            return OpResult.Ok;
         }
         catch (Exception e)
         {
-            Status = $"import push failed: {e.Message}";
+            return Fail($"import push failed: {e.Message}");
         }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
+    });
 
     // ---------------------------------------------------------------------
     // User IR / User Profile (clone) slots
@@ -1381,10 +1496,12 @@ public sealed partial class AppState : INotifyPropertyChanged
         return dot > 0 ? fileName[..dot] : fileName;
     }
 
-    /// <summary>Decodes a WAV and uploads it into User-IR <paramref name="slot"/> (0-based).</summary>
-    public async Task UploadIrAsync(int slot, byte[] bytes, string fileName)
+    /// <summary>
+    /// Decodes a WAV and uploads it into User-IR <paramref name="slot"/> (0-based). Returns Busy if the
+    /// gate is held; a failed upload throws <see cref="ImportException"/> for the error dialog.
+    /// </summary>
+    public Task<OpResult> UploadIrAsync(int slot, byte[] bytes, string fileName) => RunExclusiveAsync(async () =>
     {
-        IsLoading = true;
         ImportProgress = null;
         var name = SlotName(fileName);
 
@@ -1404,7 +1521,7 @@ public sealed partial class AppState : INotifyPropertyChanged
 
             Status = "Uploading IR…";
 
-            var result = await WriteSlotAsync(DeviceService.IrNamesRequest, "User IR", 416, chunks, isClone: false, (sent, total) =>
+            var result = await WriteSlotAsync(isClone: false, chunks, (sent, total) =>
             {
                 ImportProgress = total == 0 ? null : (double)sent / total;
                 Status = $"Uploading IR… {sent}/{total}";
@@ -1421,6 +1538,8 @@ public sealed partial class AppState : INotifyPropertyChanged
             {
                 throw new ImportException(Status);
             }
+
+            return OpResult.Ok;
         }
         catch (ImportException)
         {
@@ -1433,23 +1552,24 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
         finally
         {
-            IsLoading = false;
             ImportProgress = null;
         }
-    }
+    });
 
-    public Task RenameIrSlotAsync(int slot, string name) => RunSlotCommandAsync(
+    public Task<OpResult> RenameIrSlotAsync(int slot, string name) => RunSlotCommandAsync(
         IrUploadFrame.BuildChunks(IrUploadFrame.BuildRenameBlob(slot, name)), isClone: false,
         "renaming…", $"renamed User IR {slot + 1}");
 
-    public Task ClearIrSlotAsync(int slot) => RunSlotCommandAsync(
+    public Task<OpResult> ClearIrSlotAsync(int slot) => RunSlotCommandAsync(
         IrUploadFrame.BuildChunks(IrUploadFrame.BuildClearBlob(slot)), isClone: false,
         "clearing…", $"cleared User IR {slot + 1} — power-cycle before the next IR edit");
 
-    /// <summary>Converts a <c>.nam</c> to a clone model and uploads it into User-Profile <paramref name="slot"/>.</summary>
-    public async Task ConvertAndUploadCloneAsync(int slot, string namJson, string fileName)
+    /// <summary>
+    /// Converts a <c>.nam</c> to a clone model and uploads it into User-Profile <paramref name="slot"/>.
+    /// Returns Busy if the gate is held; a failure throws <see cref="ImportException"/>.
+    /// </summary>
+    public Task<OpResult> ConvertAndUploadCloneAsync(int slot, string namJson, string fileName) => RunExclusiveAsync(async () =>
     {
-        IsLoading = true;
         ImportProgress = null;
         var name = SlotName(fileName);
 
@@ -1458,15 +1578,11 @@ public sealed partial class AppState : INotifyPropertyChanged
             Status = "Converting NAM…";
 
             var arrays = await Task.Run(() => CloDsp.Generate(namJson, CloDsp.LoadReferenceDi()));
-            var profile = new CloProfile(
-                CloBiquad,
-                arrays.Gains,
-                arrays.ArrayA.Select(v => (double)v).ToArray(),
-                arrays.ArrayB.Select(v => (double)v).ToArray());
+            var profile = CloDsp.ToUploadProfile(arrays);
 
             var chunks = CloUploadFrame.BuildChunks(CloUploadFrame.BuildBlob(slot, name, profile));
 
-            var result = await WriteSlotAsync(DeviceService.CloneNamesRequest, "User Profile", 901, chunks, isClone: true, (sent, total) =>
+            var result = await WriteSlotAsync(isClone: true, chunks, (sent, total) =>
             {
                 ImportProgress = total == 0 ? null : (double)sent / total;
                 Status = $"Uploading clone… {sent}/{total}";
@@ -1483,6 +1599,8 @@ public sealed partial class AppState : INotifyPropertyChanged
             {
                 throw new ImportException(Status);
             }
+
+            return OpResult.Ok;
         }
         catch (ImportException)
         {
@@ -1495,58 +1613,53 @@ public sealed partial class AppState : INotifyPropertyChanged
         }
         finally
         {
-            IsLoading = false;
             ImportProgress = null;
         }
-    }
+    });
 
-    public Task RenameCloneSlotAsync(int slot, string name) => RunSlotCommandAsync(
+    public Task<OpResult> RenameCloneSlotAsync(int slot, string name) => RunSlotCommandAsync(
         CloUploadFrame.BuildChunks(CloUploadFrame.BuildRenameBlob(slot, name)), isClone: true,
         "renaming…", $"renamed User Profile {slot + 1}");
 
-    public Task ClearCloneSlotAsync(int slot) => RunSlotCommandAsync(
+    public Task<OpResult> ClearCloneSlotAsync(int slot) => RunSlotCommandAsync(
         CloUploadFrame.BuildChunks(CloUploadFrame.BuildClearBlob(slot)), isClone: true,
         "clearing…", $"cleared User Profile {slot + 1} — power-cycle before the next edit");
 
-    private async Task RunSlotCommandAsync(List<string> chunks, bool isClone, string busy, string done)
+    private Task<OpResult> RunSlotCommandAsync(List<string> chunks, bool isClone, string busy, string done) => RunExclusiveAsync(async () =>
     {
-        if (IsLoading)
-        {
-            return;
-        }
-
-        IsLoading = true;
-
         try
         {
             Status = busy;
-            var result = isClone
-                ? await WriteSlotAsync(DeviceService.CloneNamesRequest, "User Profile", 901, chunks, isClone: true, null)
-                : await WriteSlotAsync(DeviceService.IrNamesRequest, "User IR", 416, chunks, isClone: false, null);
 
-            Status = result switch
+            var result = await WriteSlotAsync(isClone, chunks, null);
+
+            if (result == WriteResult.Committed)
             {
-                WriteResult.Committed => done,
-                WriteResult.NoAck => $"{(isClone ? "Clone" : "IR")} command failed (no ACK)",
-                _ => "not saved — power-cycle the pedal, then retry",
-            };
+                Status = done;
+                return OpResult.Ok;
+            }
+
+            return Fail(result == WriteResult.NoAck
+                ? $"{(isClone ? "Clone" : "IR")} command failed (no ACK)"
+                : "not saved — power-cycle the pedal, then retry");
         }
         catch (Exception e)
         {
-            Status = $"{(isClone ? "Clone" : "IR")} command failed: {e.Message}";
+            return Fail($"{(isClone ? "Clone" : "IR")} command failed: {e.Message}");
         }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
+    });
 
     /// <summary>
     /// Mirrors the official tool's write sequence: read the slot names to enter the context
     /// (<c>020200</c> / <c>020204</c>), send the chunks, await the commit, then re-read the names.
     /// </summary>
-    private async Task<WriteResult> WriteSlotAsync(string namesRequest, string prefix, int baseId, List<string> chunks, bool isClone, Action<int, int>? onProgress)
+    private async Task<WriteResult> WriteSlotAsync(bool isClone, List<string> chunks, Action<int, int>? onProgress)
     {
+        var (namesRequest, prefix) = isClone
+            ? (DeviceService.CloneNamesRequest, "User Profile")
+            : (DeviceService.IrNamesRequest, "User IR");
+        var baseId = ModuleIds.UserSlotBase(isClone);
+
         await RefreshUserNamesAsync(namesRequest, prefix, baseId);
 
         void Progress(int sent, int total) => _dispatcher.TryEnqueue(() => onProgress?.Invoke(sent, total));

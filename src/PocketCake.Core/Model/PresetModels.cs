@@ -41,6 +41,33 @@ public sealed record GlobalSettings(
     int PowerConfirm = 0,
     int BattOnly = 0);
 
+/// <summary>Fixed module and user-slot ids shared by the decoders, the editor and the agent tools.</summary>
+public static class ModuleIds
+{
+    /// <summary>The AMP slot of the chain.</summary>
+    public const int Amp = 3;
+
+    /// <summary>The clone amp: edited in place of <see cref="Amp"/> while the preset is in clone mode.</summary>
+    public const int CloneAmp = 9;
+
+    /// <summary>Effect id of User IR 1 (User IR 1–5 are 416–420).</summary>
+    public const int UserIrBase = 416;
+
+    /// <summary>Effect id of User Profile 1 (User Profile 1–5 are 901–905).</summary>
+    public const int UserProfileBase = 901;
+
+    public const int UserSlotCount = 5;
+
+    /// <summary>The first effect id of the User Profile (clone) or User IR slots.</summary>
+    public static int UserSlotBase(bool isClone) => isClone ? UserProfileBase : UserIrBase;
+
+    /// <summary>The module whose effect and parameters to edit: AMP becomes the clone amp in clone mode.</summary>
+    public static int EditTarget(int physicalId, bool isCloneMode) => physicalId == Amp && isCloneMode ? CloneAmp : physicalId;
+
+    /// <summary>The chain slot a module lives in: the clone amp lives in the AMP slot.</summary>
+    public static int Physical(int id) => id == CloneAmp ? Amp : id;
+}
+
 /// <summary>Which hardware footswitch a module is assigned to, if any.</summary>
 public enum FootswitchAssignment { None, Fs1, Fs2 }
 

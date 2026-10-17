@@ -14,6 +14,11 @@ public partial class App : Application
             LogCrash(e.Exception);
             e.Handled = true;
         };
+
+        // Exceptions outside the XAML dispatcher: background threads and never-awaited tasks.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            LogCrash(e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString()));
+        TaskScheduler.UnobservedTaskException += (_, e) => LogCrash(e.Exception);
     }
 
     /// <summary>Appends an unhandled exception to %LOCALAPPDATA%\PocketCake\crash.log.</summary>

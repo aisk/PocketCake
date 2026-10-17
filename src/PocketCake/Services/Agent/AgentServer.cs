@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Dispatching;
 using ModelContextProtocol.Protocol;
+using PocketCake.Core.Agent;
 using PocketCake.ViewModels;
 
 namespace PocketCake.Services.Agent;
@@ -13,14 +14,16 @@ namespace PocketCake.Services.Agent;
 /// <summary>
 /// Hosts the MCP endpoint AI agents use to drive the editor: Streamable HTTP on
 /// <c>http://127.0.0.1:{port}/mcp</c>. Tools run against the live <see cref="AppState"/>, so every
-/// agent edit shows up in the UI. Loopback-only, and requests from a non-local Host / Origin are
-/// refused (DNS-rebinding guard).
+/// agent edit shows up in the UI. Loopback-only, requests from a non-local Host / Origin are
+/// refused (DNS-rebinding guard), and every request must carry the bearer token from settings.
 /// </summary>
-public sealed class AgentServer(AppState state, DispatcherQueue dispatcher, int port)
+public sealed class AgentServer(AppState state, DispatcherQueue dispatcher, AppSettings settings)
 {
+    private const string TokenRequired = "token required — copy the setup command from PocketCake Settings";
+
     private WebApplication? _app;
 
-    public int Port { get; } = port;
+    public int Port { get; } = settings.AgentPort;
 
     public string Url => $"http://127.0.0.1:{Port}/mcp";
 
@@ -52,9 +55,20 @@ public sealed class AgentServer(AppState state, DispatcherQueue dispatcher, int 
         var app = builder.Build();
         app.Use(async (context, next) =>
         {
-            if (!IsLocal(context.Request))
+            var request = context.Request;
+            var origin = request.Headers.Origin.ToString();
+
+            if (!AgentAuth.IsLocal(request.Host.Host, origin))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+
+            // Read per request, so a token reset takes effect without a restart.
+            if (!AgentAuth.IsAuthorized(request.Host.Host, origin, request.Headers.Authorization.ToString(), settings.AgentToken))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsync(TokenRequired);
                 return;
             }
 
@@ -89,20 +103,6 @@ public sealed class AgentServer(AppState state, DispatcherQueue dispatcher, int 
 
     private static string AppVersion =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
-
-    private static bool IsLocal(HttpRequest request)
-    {
-        static bool IsLoopbackHost(string host) => host is "127.0.0.1" or "localhost" or "[::1]";
-
-        if (!IsLoopbackHost(request.Host.Host))
-        {
-            return false;
-        }
-
-        var origin = request.Headers.Origin.ToString();
-
-        return origin.Length == 0 || (Uri.TryCreate(origin, UriKind.Absolute, out var uri) && IsLoopbackHost(uri.Host));
-    }
 
     private static string LoadGuide()
     {

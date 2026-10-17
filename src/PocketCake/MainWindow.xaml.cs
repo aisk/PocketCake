@@ -30,7 +30,7 @@ public sealed partial class MainWindow : Window
         Instance = this;
         var settings = AppSettings.Load();
         State = new AppState(DispatcherQueue, settings);
-        Agent = new AgentServer(State, DispatcherQueue, settings.AgentPort);
+        Agent = new AgentServer(State, DispatcherQueue, settings);
         Settings = new SettingsViewModel(State, Agent, settings);
         Presets = new PresetsViewModel(State);
         Slots = new SlotsViewModel(State);
@@ -211,6 +211,12 @@ public sealed partial class MainWindow : Window
         if (Environment.GetEnvironmentVariable("POCKETCAKE_DEMO_PRESET") is { Length: 3 } label &&
             PresetRef.All.FirstOrDefault(p => p.Label == label) is { Number: > 0 } preset)
         {
+            // The post-connect name sync holds the operation gate for a moment.
+            for (var i = 0; i < 100 && State.IsLoading; i++)
+            {
+                await Task.Delay(100);
+            }
+
             await State.LoadPresetAsync(preset);
         }
 

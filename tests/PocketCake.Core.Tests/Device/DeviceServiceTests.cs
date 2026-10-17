@@ -1,3 +1,4 @@
+using PocketCake.Core.Demo;
 using PocketCake.Core.Device;
 using PocketCake.Core.Protocol;
 
@@ -14,8 +15,6 @@ internal sealed class FakeTransport : ITransport
     public event Action<byte[]>? PacketReceived;
 
     public event Action<bool>? ConnectionChanged;
-
-    public bool HasConnectionEvents => false;
 
     public Task ConnectAsync(string? target, CancellationToken ct = default)
     {
@@ -38,6 +37,9 @@ internal sealed class FakeTransport : ITransport
 
     /// <summary>Delivers an 8080-prefixed frame as the F0-led packet a real transport would raise.</summary>
     public void Receive(string frameHex) => PacketReceived?.Invoke(BleFraming.ToF0Led(Hex.Parse(frameHex)));
+
+    /// <summary>Raises a raw F0-led packet (e.g. one packet of a multi-packet USB response).</summary>
+    public void RaiseRaw(byte[] packet) => PacketReceived?.Invoke(packet);
 
     public Task DisconnectAsync() => Task.CompletedTask;
 
@@ -107,6 +109,41 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
+    public async Task RequestIgnoresAnUnrelatedDataFrameThatArrivesFirst()
+    {
+        // An unsolicited / stale dump (preset names) lands before the state dump the request asked for.
+        var transport = new FakeTransport { Responder = _ => [Captures.PresetNamesDump, Captures.U01StateDump] };
+        var service = new DeviceService(transport);
+
+        Assert.Equal(Captures.U01StateDump, await service.RequestStateDumpAsync());
+    }
+
+    [Fact]
+    public async Task RequestTimesOutWhenOnlyUnrelatedDataFramesArrive()
+    {
+        var transport = new FakeTransport { Responder = _ => [Captures.IrNamesDump] };
+        var service = new DeviceService(transport);
+
+        Assert.Null(await service.RequestUserNamesAsync(DeviceService.CloneNamesRequest));
+    }
+
+    [Fact]
+    public async Task ConnectDropsAHalfReassembledResponse()
+    {
+        var transport = new FakeTransport();
+        var service = new DeviceService(transport);
+        var received = new List<InboundMessage>();
+        service.Inbound += received.Add;
+
+        // Raw two-packet USB response; only packet 0 arrives before the link is reopened.
+        transport.RaiseRaw([0xF0, 0x01, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0xA0, 0xF7]);
+        await service.ConnectAsync(null);
+        transport.RaiseRaw([0xF0, 0x01, 0x02, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0xA1, 0xF7]);
+
+        Assert.Empty(received);
+    }
+
+    [Fact]
     public async Task UploadCommitsWhenEveryChunkAckedAndCommitArrives()
     {
         var chunks = IrUploadFrame.BuildChunks(IrUploadFrame.BuildRenameBlob(2, "abcde12345"));
@@ -157,6 +194,19 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
+    public async Task UploadCommitsWhenTheCommitArrivesTogetherWithTheLastAck()
+    {
+        var chunks = IrUploadFrame.BuildChunks(IrUploadFrame.BuildRenameBlob(2, "abcde12345"));
+        var transport = new FakeTransport();
+        var service = new DeviceService(transport);
+
+        // The commit lands in the same burst as the final ACK, before the ACK waiter returns.
+        transport.Responder = frame => frame == chunks[^1] ? [Ack, IrCommit] : [Ack];
+
+        Assert.Equal(WriteResult.Committed, await service.UploadIrAsync(chunks));
+    }
+
+    [Fact]
     public async Task CloneUploadCommitsOnCloneCommitSignature()
     {
         var chunks = IrUploadFrame.BuildChunks(IrUploadFrame.BuildClearBlob(2));
@@ -179,4 +229,51 @@ public sealed class DeviceServiceTests
     // The pedal flashes after the last ACK, so the commit notification arrives later.
     private static void CommitLater(FakeTransport transport, string commit = IrCommit) =>
         _ = Task.Delay(100).ContinueWith(_ => transport.Receive(commit), TaskScheduler.Default);
+}
+
+/// <summary>Request/reply correlation against the real captures.</summary>
+public sealed class ReplyMatchesTests
+{
+    private const string StateRequest = "8080F0000900010000000201020401F7";
+    private const string GlobalRequest = "8080F00B0900010000000201020100F7";
+    private const string PresetNamesRequest = "8080F0000E00010000000201020400F7";
+
+    public static TheoryData<string, string> Pairs => new()
+    {
+        { StateRequest, Captures.U01StateDump },
+        { StateRequest, Captures.U02StateDump },
+        { StateRequest, Captures.P05StateDump },
+        { StateRequest, Captures.P09StateDump },
+        { StateRequest, Captures.P12StateDump },
+        { GlobalRequest, Captures.GlobalSettingsDump },
+        { PresetNamesRequest, Captures.PresetNamesDump },
+        { DeviceService.CloneNamesRequest, Captures.CloneNamesDump },
+        { DeviceService.IrNamesRequest, Captures.IrNamesDump },
+    };
+
+    [Theory]
+    [MemberData(nameof(Pairs))]
+    public void AcceptsTheCaptureForItsRequest(string request, string reply)
+    {
+        Assert.True(DeviceService.ReplyMatches(request, reply));
+        Assert.True(DeviceService.ReplyMatches(request.ToLowerInvariant(), reply));
+    }
+
+    [Theory]
+    [MemberData(nameof(Pairs))]
+    public void RejectsEveryOtherCaptureType(string request, string reply)
+    {
+        foreach (var (otherRequest, otherReply) in Pairs.Select(row => ((string)row[0], (string)row[1])))
+        {
+            if (otherRequest != request)
+            {
+                Assert.False(DeviceService.ReplyMatches(request, otherReply));
+            }
+        }
+
+        Assert.False(DeviceService.ReplyMatches(request, IrCommit));
+        Assert.False(DeviceService.ReplyMatches(request, reply[..20]));
+    }
+
+    private const string IrCommit = "8080F00E020001000000060102010B0004000000000000F7";
 }

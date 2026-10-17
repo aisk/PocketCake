@@ -61,6 +61,12 @@ public static class SysexChunkUpload
     /// <summary>Builds a single <c>8080…F7</c> frame for <paramref name="seq"/> of <paramref name="total"/>.</summary>
     public static string Frame(int total, int seq, IReadOnlyList<int> part)
     {
+        // total travels as one byte; a larger blob would silently wrap the chunk counter.
+        if (total > 0xFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(total), total, "a chunked upload carries at most 255 chunks");
+        }
+
         var crc = Crc8Smbus.OfBytes(new[] { total, seq, part.Count }.Concat(part));
 
         var bytes = new List<int> { 0xF0 };
@@ -99,7 +105,9 @@ public static class PresetFieldFrame
 public static class FootswitchFrame
 {
     public static string Build(int moduleId, bool isFs2, bool isOn) =>
-        SysexWriteFrame.Build([0x11, 0x4D, isFs2 ? 1 : 0, moduleId, isOn ? 1 : 0]);
+        moduleId is >= 0 and <= 8
+            ? SysexWriteFrame.Build([0x11, 0x4D, isFs2 ? 1 : 0, moduleId, isOn ? 1 : 0])
+            : throw new ArgumentOutOfRangeException(nameof(moduleId), moduleId, "must be a physical chain module (0-8)");
 }
 
 /// <summary>
@@ -114,13 +122,6 @@ public static class GlobalSettingWriter
         0x01, 0x00, 0x0A, 0x11, 0x11,
         a0 & 0xFF, a1 & 0xFF, 0x00, 0x00,
         .. Int32Le(value),
-    ]);
-
-    /// <summary>"Standalone bool" write (selector <c>11 &lt;(a&lt;&lt;4)|b&gt;</c>, one value byte).</summary>
-    public static string StandaloneBool(int a, int b, int value) => BuildFrame(
-    [
-        0x01, 0x00, 0x06, 0x11, ((a & 0x0F) << 4) | (b & 0x0F),
-        value & 0xFF, 0x00, 0x00, 0x00,
     ]);
 
     /// <summary>"Register write" (<c>11 &lt;reg&gt; &lt;sub&gt; &lt;val&gt;</c>), used by EXP/FS Target.</summary>
@@ -150,6 +151,44 @@ public static class GlobalSettingWriter
 
         return [(int)(u & 0xFF), (int)((u >> 8) & 0xFF), (int)((u >> 16) & 0xFF), (int)((u >> 24) & 0xFF)];
     }
+}
+
+/// <summary>
+/// Where each device-global setting lives: the dumpRecord address of the plain settings and the
+/// register / sub of the EXP/FS Target, plus the Target option lists the pedal shows.
+/// </summary>
+public static class GlobalSettingRegisters
+{
+    /// <summary>Address (a0, a1) of each device-global setting written via a dumpRecord frame.</summary>
+    public static readonly IReadOnlyDictionary<string, (int A0, int A1)> DumpRecordAddress = new Dictionary<string, (int A0, int A1)>
+    {
+        ["mode"] = (0x04, 0x04),
+        ["reamp"] = (0x06, 0x04),
+        ["expFsType"] = (0x01, 0x05),
+        ["backlight"] = (0x03, 0x02),
+        ["eco"] = (0x04, 0x02),
+        ["powerConfirm"] = (0x05, 0x02),
+        ["battOnly"] = (0x06, 0x02),
+    };
+
+    public static readonly IReadOnlyList<string> ExpTargets = ["VOL", "FX1", "DRV", "AMP", "IR", "FX2", "DLY", "RVB"];
+
+    public static readonly IReadOnlyList<string> FsTargets =
+    [
+        "Preset-", "Preset+", "Tap Tempo", "NR", "FX1", "DRV", "AMP", "IR", "EQ", "FX2", "DLY", "RVB",
+        "CTRL 1", "CTRL 2", "Drum", "REC/Play", "Loop Stop", "Tuner",
+    ];
+
+    /// <summary>The Target options for an EXP/FS type (0 = EXP, 1 = Single FS, 2 = Dual FS).</summary>
+    public static IReadOnlyList<string> TargetOptions(int expFsType) => expFsType == 0 ? ExpTargets : FsTargets;
+
+    /// <summary>The register / sub an EXP/FS Target write goes to; the current type picks it.</summary>
+    public static (int Reg, int Sub) ExpFsTarget(int expFsType, bool isFunc2) => expFsType switch
+    {
+        0 => (0x17, 0x01), // EXP
+        1 => (0x16, 0x00), // SingleFS
+        _ => isFunc2 ? (0x16, 0x04) : (0x16, 0x02), // DualFS Func 1 / Func 2
+    };
 }
 
 /// <summary>Adapts stored command hex to the USB-MIDI wire form: strips a leading <c>8080</c> BLE header.</summary>

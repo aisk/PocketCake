@@ -157,7 +157,12 @@
                         <Button
                             Click="OnCopyAgentCommandClick"
                             Content="Copy setup command"
-                            ToolTipService.ToolTip="{x:Bind ViewModel.AgentCommand}"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.AgentCommand, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.AgentControl, Mode=OneWay}" />
+                        <Button
+                            Click="OnResetAgentTokenClick"
+                            Content="Reset token"
+                            ToolTipService.ToolTip="Issue a new token; agents must be set up again"
                             Visibility="{x:Bind ViewModel.AgentControl, Mode=OneWay}" />
                         <ToggleSwitch IsOn="{x:Bind ViewModel.AgentControl, Mode=TwoWay}" />
                     </StackPanel>

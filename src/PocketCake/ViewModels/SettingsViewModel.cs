@@ -1,4 +1,5 @@
 using PocketCake.Core.Model;
+using PocketCake.Core.Protocol;
 using PocketCake.Services;
 using PocketCake.Services.Agent;
 
@@ -10,14 +11,6 @@ namespace PocketCake.ViewModels;
 /// </summary>
 public sealed class SettingsViewModel : ObservableObject
 {
-    public static readonly IReadOnlyList<string> ExpTargets = ["VOL", "FX1", "DRV", "AMP", "IR", "FX2", "DLY", "RVB"];
-
-    public static readonly IReadOnlyList<string> FsTargets =
-    [
-        "Preset-", "Preset+", "Tap Tempo", "NR", "FX1", "DRV", "AMP", "IR", "EQ", "FX2", "DLY", "RVB",
-        "CTRL 1", "CTRL 2", "Drum", "REC/Play", "Loop Stop", "Tuner",
-    ];
-
     private readonly AppState _state;
     private readonly AgentServer _agent;
     private readonly AppSettings _settings;
@@ -70,7 +63,7 @@ public sealed class SettingsViewModel : ObservableObject
     /// <summary>0 = EXP, 1 = Single FS, 2 = Dual FS.</summary>
     public int ExpFsType { get => G?.ExpFsType ?? 0; set => Setting("expFsType", value, G?.ExpFsType); }
 
-    public IReadOnlyList<string> TargetOptions => ExpFsType == 0 ? ExpTargets : FsTargets;
+    public IReadOnlyList<string> TargetOptions => GlobalSettingRegisters.TargetOptions(ExpFsType);
 
     public string Target1Header => ExpFsType == 2 ? "Function 1" : "Target";
 
@@ -165,9 +158,17 @@ public sealed class SettingsViewModel : ObservableObject
         ? $"MCP endpoint: {_agent.Url}"
         : "Let Claude and other MCP agents read and edit presets. Saves and uploads still ask you first.");
 
-    public string AgentCommand => $"claude mcp add --transport http pocketcake {_agent.Url}";
+    public string AgentCommand =>
+        $"claude mcp add --transport http pocketcake {_agent.Url} --header \"Authorization: Bearer {_settings.AgentToken}\"";
 
     public Task StartAgentIfEnabledAsync() => _settings.AgentControl ? ApplyAgentAsync(true) : Task.CompletedTask;
+
+    /// <summary>Issues a new agent token; agents set up with the old command must be set up again.</summary>
+    public void ResetAgentToken()
+    {
+        _settings.ResetAgentToken();
+        OnPropertyChanged(nameof(AgentCommand));
+    }
 
     private async Task ApplyAgentAsync(bool enable)
     {
@@ -175,6 +176,13 @@ public sealed class SettingsViewModel : ObservableObject
 
         try
         {
+            if (enable)
+            {
+                // The token is created the first time agent control is turned on.
+                _settings.EnsureAgentToken();
+                OnPropertyChanged(nameof(AgentCommand));
+            }
+
             await (enable ? _agent.StartAsync() : _agent.StopAsync());
         }
         catch (Exception e)

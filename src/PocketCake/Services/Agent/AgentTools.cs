@@ -69,14 +69,20 @@ public sealed record SlotInfo(string Kind, int Slot, string Name);
 
 /// <summary>
 /// The MCP tools. Each call is marshalled onto the UI thread and goes through <see cref="AppState"/>,
-/// exactly like a click in the editor. Flash writes (save, slot uploads / renames / clears) are
-/// confirmed by the user in a dialog first; factory reset is not exposed.
+/// exactly like a click in the editor. Flash writes (save, slot uploads / renames / clears) and
+/// loads that discard unsaved edits are confirmed by the user in a dialog first; factory reset is
+/// not exposed. Tools that talk to the pedal run one at a time; a second one is refused as busy.
 /// </summary>
 public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 {
+    private const string BusyMessage = "PocketCake is busy with another device operation; retry in a moment";
+
     private static readonly string[] ChainModules = ["NR", "FX1", "DRV", "AMP", "IR", "EQ", "FX2", "DLY", "RVB"];
 
     private static readonly string[] ExpFsTypes = ["exp", "single", "dual"];
+
+    // Serializes the round-trip / mutating tools (fail-fast, never queued).
+    private readonly SemaphoreSlim _toolGate = new(1, 1);
 
     // ---------------------------------------------------------------------
     // Connection
@@ -88,7 +94,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "list_devices", ReadOnly = true)]
     [Description("Lists pedals that can be connected. 'usb' enumerates USB-MIDI ports; 'ble' scans Bluetooth MIDI for 3 s.")]
-    public Task<List<DeviceInfo>> ListDevices([Description("usb or ble")] string transport) => OnUi(async () =>
+    public Task<List<DeviceInfo>> ListDevices([Description("usb or ble")] string transport) => OnUiExclusive(async () =>
         ParseTransport(transport) == TransportKind.Usb
             ? (await MidiTransport.EnumerateAsync())
                 .Select(d => new DeviceInfo(d.Name, d.Connectable ? "USB MIDI in + out" : d.HasInput ? "input only" : "output only", d.Connectable))
@@ -102,7 +108,8 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     public Task<StatusInfo> Connect([Description("usb or ble")] string transport, [Description("Device name from list_devices")] string name) =>
         OnUi(async () =>
         {
-            RequireIdle();
+            // Connection lifecycle is never refused as busy.
+            RequireStarted();
             await state.ConnectAndPersistAsync(ParseTransport(transport), name);
 
             return state.IsConnected ? Status() : throw new McpException(state.Status ?? "connect failed");
@@ -112,7 +119,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     [Description("Connects to a virtual Smart Box that replays real device captures. Nothing reaches a pedal; use it to explore without hardware.")]
     public Task<StatusInfo> StartDemo() => OnUi(async () =>
     {
-        RequireIdle();
+        RequireStarted();
         await state.StartDemoAsync();
 
         return Status();
@@ -154,24 +161,32 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     });
 
     [McpServerTool(Name = "load_preset")]
-    [Description("Selects a preset on the pedal (discarding unsaved edits) and returns its decoded content.")]
-    public Task<PresetDetail> LoadPreset([Description("Preset label, e.g. P01 or F12")] string preset) => OnUi(async () =>
+    [Description("Selects a preset on the pedal and returns its decoded content. Discarding unsaved edits needs the user's approval in PocketCake.")]
+    public Task<PresetDetail> LoadPreset([Description("Preset label, e.g. P01 or F12")] string preset) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var target = ParsePreset(preset);
-        await state.LoadPresetAsync(target);
 
-        return state.CurrentPreset == target ? Detail() : throw new McpException(state.Status ?? "load failed");
+        if (state.IsModified)
+        {
+            var info = Preset(target);
+            await ConfirmAsync("Discard unsaved edits?", $"An AI agent wants to load {info.Label} \"{info.Name}\", discarding unsaved edits.", "Discard");
+        }
+
+        Check(await state.LoadPresetAsync(target));
+
+        return Detail();
     });
 
     [McpServerTool(Name = "get_preset", ReadOnly = true)]
     [Description("The live preset: volume, BPM, signal chain order, and for every module its on/off state, footswitch, effect and parameter values.")]
-    public Task<PresetDetail> GetPreset() => OnUi(async () =>
+    public Task<PresetDetail> GetPreset() => OnUiExclusive(async () =>
     {
         RequireConnected();
 
-        if (state.PresetState is null && !state.IsLoading)
+        if (state.PresetState is null)
         {
+            // Busy or unreadable: Detail() reports the missing state.
             await state.RefreshDecodedStateAsync();
         }
 
@@ -208,7 +223,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     [Description("Changes the effect a module runs. Parameters reset to the new effect's stored values; returns the module afterwards.")]
     public Task<ModuleInfo> SetEffect(
         [Description("Module name")] string module,
-        [Description("Effect id or exact name from list_effects")] JsonElement effect) => OnUi(async () =>
+        [Description("Effect id or exact name from list_effects")] JsonElement effect) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var data = state.Data!;
@@ -226,7 +241,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "set_module_enabled")]
     [Description("Turns a module on or off.")]
-    public Task<ModuleInfo> SetModuleEnabled([Description("Module name")] string module, bool enabled) => OnUi(async () =>
+    public Task<ModuleInfo> SetModuleEnabled([Description("Module name")] string module, bool enabled) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var id = Physical(ParseModule(module));
@@ -242,7 +257,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     public Task<ModuleInfo> SetParameters(
         [Description("Module name")] string module,
         [Description("Map of parameter name or algId to value, e.g. {\"Gain\": 6.5, \"Mode\": \"Bright\"}")] Dictionary<string, JsonElement> values) =>
-        OnUi(async () =>
+        OnUiExclusive(async () =>
         {
             RequireIdle();
             var data = state.Data!;
@@ -274,7 +289,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         "Reorders the signal chain. Pass all nine modules in order; DRV, AMP, IR, EQ must stay together in that order, " +
         "the other five can go anywhere around that block.")]
     public Task<PresetDetail> SetChainOrder([Description("e.g. [\"NR\",\"FX1\",\"DRV\",\"AMP\",\"IR\",\"EQ\",\"FX2\",\"DLY\",\"RVB\"]")] string[] order) =>
-        OnUi(async () =>
+        OnUiExclusive(async () =>
         {
             RequireIdle();
             var names = order.Select(n => n.ToUpperInvariant()).ToList();
@@ -298,7 +313,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "set_footswitch")]
     [Description("Assigns a module to footswitch FS1 or FS2 (each carries at most 3 modules), or none.")]
-    public Task<ModuleInfo> SetFootswitch([Description("Module name")] string module, [Description("none, fs1 or fs2")] string assignment) => OnUi(async () =>
+    public Task<ModuleInfo> SetFootswitch([Description("Module name")] string module, [Description("none, fs1 or fs2")] string assignment) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var id = Physical(ParseModule(module));
@@ -322,7 +337,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "set_amp_mode")]
     [Description("Switches the AMP slot between the built-in amp models ('amp') and user clone profiles ('clone').")]
-    public Task<ModuleInfo> SetAmpMode([Description("amp or clone")] string mode) => OnUi(async () =>
+    public Task<ModuleInfo> SetAmpMode([Description("amp or clone")] string mode) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var clone = mode.ToLowerInvariant() switch
@@ -334,12 +349,12 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
         await Edit(() => state.SetAmpModeAsync(clone));
 
-        return state.PresetState?.IsCloneMode == clone ? DescribeModule(3) : throw NotApplied("the AMP slot did not switch");
+        return state.PresetState?.IsCloneMode == clone ? DescribeModule(ModuleIds.Amp) : throw NotApplied("the AMP slot did not switch");
     });
 
     [McpServerTool(Name = "set_preset_settings")]
     [Description("Sets the preset volume (0-100) and/or the preset BPM (40-260).")]
-    public Task<PresetDetail> SetPresetSettings(int? volume = null, int? bpm = null) => OnUi(async () =>
+    public Task<PresetDetail> SetPresetSettings(int? volume = null, int? bpm = null) => OnUiExclusive(async () =>
     {
         RequireIdle();
 
@@ -368,7 +383,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "save_preset", Destructive = true)]
     [Description("Saves the live edits into a User slot, overwriting it. The user must approve in PocketCake.")]
-    public Task<PresetDetail> SavePreset([Description("User slot 1-50")] int slot, [Description("Up to 10 characters")] string name) => OnUi(async () =>
+    public Task<PresetDetail> SavePreset([Description("User slot 1-50")] int slot, [Description("Up to 10 characters")] string name) => OnUiExclusive(async () =>
     {
         RequireIdle();
         name = name.Trim();
@@ -386,7 +401,9 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         var target = Preset(new PresetRef(PresetBank.User, slot));
         await ConfirmAsync("Save preset?", $"An AI agent wants to save the current edits as \"{name}\" to {target.Label}, overwriting \"{target.Name}\".", "Save");
 
-        return await state.SavePresetAsync(slot, name) ? Detail() : throw new McpException(state.Status ?? "save failed");
+        Check(await state.SavePresetAsync(slot, name));
+
+        return Detail();
     });
 
     [McpServerTool(Name = "export_preset", ReadOnly = true)]
@@ -399,13 +416,29 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     });
 
     [McpServerTool(Name = "import_preset")]
-    [Description("Pushes a preset JSON (as export_preset returns) to the pedal's live state. Nothing is stored until save_preset.")]
-    public Task<PresetDetail> ImportPreset([Description("Preset JSON text")] string json) => OnUi(async () =>
+    [Description("Pushes a preset JSON (as export_preset returns) to the pedal's live state. Nothing is stored until save_preset. Discarding unsaved edits needs the user's approval in PocketCake.")]
+    public Task<PresetDetail> ImportPreset([Description("Preset JSON text")] string json) => OnUiExclusive(async () =>
     {
         RequireIdle();
-        await state.ImportPresetAsync(json);
 
-        return state.Status?.StartsWith("imported", StringComparison.Ordinal) == true ? Detail() : throw new McpException(state.Status ?? "import failed");
+        // Validate first, so bad JSON fails without a pointless prompt.
+        try
+        {
+            PresetJson.FromJson(json, state.Data!);
+        }
+        catch (Exception e)
+        {
+            throw new McpException($"import failed: {e.Message}");
+        }
+
+        if (state.IsModified)
+        {
+            await ConfirmAsync("Discard unsaved edits?", "An AI agent wants to load an imported preset, discarding unsaved edits.", "Discard");
+        }
+
+        Check(await state.ImportPresetAsync(json));
+
+        return Detail();
     });
 
     // ---------------------------------------------------------------------
@@ -426,7 +459,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         "Sets one device-wide setting: masterVolume (0-100); inputLevel, fxRecLevel, btRecLevel, monitorLevel (dB); usbMode (dry/wet); " +
         "reamp, eco, powerConfirm, battOnly (true/false); backlight (0-10); expFsType (exp/single/dual); expFsTarget, expFsTarget2 " +
         "(a target name from get_global_settings' targetOptions).")]
-    public Task<Dictionary<string, object>> SetGlobalSetting(string name, JsonElement value) => OnUi(async () =>
+    public Task<Dictionary<string, object>> SetGlobalSetting(string name, JsonElement value) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var g = state.GlobalSettings ?? throw new McpException("global settings not read yet; retry shortly");
@@ -434,23 +467,24 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         switch (name)
         {
             case "masterVolume":
-                await state.SetGlobalVolumeAsync(Int(value, 0, 100));
+                await Edit(() => state.SetGlobalVolumeAsync(Int(value, 0, 100)));
                 break;
             case "inputLevel" or "fxRecLevel" or "btRecLevel" or "monitorLevel":
                 var keys = state.Data!.Commands.GlobalCommands.GetValueOrDefault(name)?.Keys.ToList() ?? [];
-                await state.SetGlobalLevelAsync(name, Int(value, keys.DefaultIfEmpty(0).Min(), keys.DefaultIfEmpty(0).Max()));
+                var level = Int(value, keys.DefaultIfEmpty(0).Min(), keys.DefaultIfEmpty(0).Max());
+                await Edit(() => state.SetGlobalLevelAsync(name, level));
                 break;
             case "usbMode":
-                await state.SetGlobalSettingAsync("mode", Choice(value, ["dry", "wet"]));
+                await Edit(() => state.SetGlobalSettingAsync("mode", Choice(value, ["dry", "wet"])));
                 break;
             case "reamp" or "eco" or "powerConfirm" or "battOnly":
-                await state.SetGlobalSettingAsync(name, Bool(value) ? 1 : 0);
+                await Edit(() => state.SetGlobalSettingAsync(name, Bool(value) ? 1 : 0));
                 break;
             case "backlight":
-                await state.SetGlobalSettingAsync(name, Int(value, 0, 10));
+                await Edit(() => state.SetGlobalSettingAsync(name, Int(value, 0, 10)));
                 break;
             case "expFsType":
-                await state.SetGlobalSettingAsync(name, Choice(value, ExpFsTypes));
+                await Edit(() => state.SetGlobalSettingAsync(name, Choice(value, ExpFsTypes)));
                 break;
             case "expFsTarget" or "expFsTarget2":
                 if (name == "expFsTarget2" && g.ExpFsType != 2)
@@ -458,7 +492,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
                     throw new McpException("expFsTarget2 only exists while expFsType is dual");
                 }
 
-                await state.SetExpFsTargetAsync(Choice(value, TargetOptions(g)), name == "expFsTarget2");
+                await Edit(() => state.SetExpFsTargetAsync(Choice(value, GlobalSettingRegisters.TargetOptions(g.ExpFsType)), name == "expFsTarget2"));
                 break;
             default:
                 throw new McpException($"unknown setting '{name}'");
@@ -477,9 +511,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     {
         RequireConnected();
 
-        return Task.FromResult(Enumerable.Range(0, 5).Select(i => new SlotInfo("ir", i + 1, state.EffectDisplayName(416 + i)))
-            .Concat(Enumerable.Range(0, 5).Select(i => new SlotInfo("clone", i + 1, state.EffectDisplayName(901 + i))))
-            .ToList());
+        return Task.FromResult(Slots());
     });
 
     [McpServerTool(Name = "upload_ir", Destructive = true)]
@@ -494,7 +526,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     [McpServerTool(Name = "rename_user_slot", Destructive = true)]
     [Description("Renames a User IR or User Profile slot. The user must approve in PocketCake.")]
-    public Task<List<SlotInfo>> RenameUserSlot([Description("ir or clone")] string kind, [Description("Slot 1-5")] int slot, string name) => OnUi(async () =>
+    public Task<List<SlotInfo>> RenameUserSlot([Description("ir or clone")] string kind, [Description("Slot 1-5")] int slot, string name) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var isClone = ParseSlotKind(kind);
@@ -508,26 +540,26 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         }
 
         await ConfirmAsync("Rename slot?", $"An AI agent wants to rename {SlotTitle(index, isClone)} to \"{name}\".", "Rename");
-        await (isClone ? state.RenameCloneSlotAsync(index, name) : state.RenameIrSlotAsync(index, name));
+        Check(await (isClone ? state.RenameCloneSlotAsync(index, name) : state.RenameIrSlotAsync(index, name)));
 
-        return await ListUserSlots();
+        return Slots();
     });
 
     [McpServerTool(Name = "clear_user_slot", Destructive = true)]
     [Description("Erases a User IR or User Profile slot. The user must approve in PocketCake.")]
-    public Task<List<SlotInfo>> ClearUserSlot([Description("ir or clone")] string kind, [Description("Slot 1-5")] int slot) => OnUi(async () =>
+    public Task<List<SlotInfo>> ClearUserSlot([Description("ir or clone")] string kind, [Description("Slot 1-5")] int slot) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var isClone = ParseSlotKind(kind);
         var index = SlotIndex(slot);
 
-        await ConfirmAsync("Clear slot?", $"An AI agent wants to erase {SlotTitle(index, isClone)} (\"{state.EffectDisplayName((isClone ? 901 : 416) + index)}\").", "Clear");
-        await (isClone ? state.ClearCloneSlotAsync(index) : state.ClearIrSlotAsync(index));
+        await ConfirmAsync("Clear slot?", $"An AI agent wants to erase {SlotTitle(index, isClone)} (\"{state.EffectDisplayName(ModuleIds.UserSlotBase(isClone) + index)}\").", "Clear");
+        Check(await (isClone ? state.ClearCloneSlotAsync(index) : state.ClearIrSlotAsync(index)));
 
-        return await ListUserSlots();
+        return Slots();
     });
 
-    private Task<List<SlotInfo>> UploadAsync(int slot, string path, bool isClone) => OnUi(async () =>
+    private Task<List<SlotInfo>> UploadAsync(int slot, string path, bool isClone) => OnUiExclusive(async () =>
     {
         RequireIdle();
         var index = SlotIndex(slot);
@@ -538,7 +570,13 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             throw new McpException($"no such file: {path}");
         }
 
-        Func<Task> upload;
+        // Checked before reading: an agent must not make PocketCake slurp arbitrary or huge files.
+        if (SlotUploadFile.Problem(path, new FileInfo(path).Length, isClone) is { } problem)
+        {
+            throw new McpException($"{path}: {problem}");
+        }
+
+        Func<Task<OpResult>> upload;
 
         if (isClone)
         {
@@ -561,13 +599,17 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             upload = () => state.UploadIrAsync(index, bytes, fileName);
         }
 
-        await ConfirmAsync("Upload to slot?", $"An AI agent wants to upload \"{fileName}\" into {SlotTitle(index, isClone)}, replacing \"{state.EffectDisplayName((isClone ? 901 : 416) + index)}\".", "Upload");
+        await ConfirmAsync("Upload to slot?", $"An AI agent wants to upload \"{path}\" into {SlotTitle(index, isClone)}, replacing \"{state.EffectDisplayName(ModuleIds.UserSlotBase(isClone) + index)}\".", "Upload");
+
+        // Something else may have started while the dialog was up.
+        RequireIdle();
 
         var close = Dialogs.ShowProgress($"Uploading to {SlotTitle(index, isClone)}");
+        OpResult result;
 
         try
         {
-            await upload();
+            result = await upload();
         }
         catch (ImportException e)
         {
@@ -578,7 +620,9 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             close();
         }
 
-        return await ListUserSlots();
+        Check(result);
+
+        return Slots();
     });
 
     // ---------------------------------------------------------------------
@@ -597,6 +641,11 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         state.Status);
 
     private PresetInfo Preset(PresetRef p) => new(p.Label, state.PresetLabelName(p));
+
+    private List<SlotInfo> Slots() =>
+        Enumerable.Range(0, ModuleIds.UserSlotCount).Select(i => new SlotInfo("ir", i + 1, state.EffectDisplayName(ModuleIds.UserIrBase + i)))
+            .Concat(Enumerable.Range(0, ModuleIds.UserSlotCount).Select(i => new SlotInfo("clone", i + 1, state.EffectDisplayName(ModuleIds.UserProfileBase + i))))
+            .ToList();
 
     private PresetDetail Detail()
     {
@@ -626,7 +675,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             name,
             st?.ModuleStates.GetValueOrDefault(name) ?? false,
             footswitch.ToString().ToLowerInvariant(),
-            physicalId == 3 ? (id == 9 ? "clone" : "amp") : null,
+            physicalId == ModuleIds.Amp ? (id == ModuleIds.CloneAmp ? "clone" : "amp") : null,
             effect is null ? null : new EffectRef(effect.Id, state.EffectDisplayName(effect.Id)),
             effect?.Params.Select(p => DescribeParameter(p, values)).OfType<ParameterInfo>().ToList() ?? []);
     }
@@ -687,7 +736,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     private Dictionary<string, object> Globals()
     {
         var g = state.GlobalSettings ?? throw new McpException("global settings not read yet; retry shortly");
-        var targets = TargetOptions(g);
+        var targets = GlobalSettingRegisters.TargetOptions(g.ExpFsType);
 
         var result = new Dictionary<string, object>
         {
@@ -715,9 +764,6 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         return result;
     }
 
-    private static IReadOnlyList<string> TargetOptions(GlobalSettings g) =>
-        g.ExpFsType == 0 ? SettingsViewModel.ExpTargets : SettingsViewModel.FsTargets;
-
     // ---------------------------------------------------------------------
     // Argument parsing
     // ---------------------------------------------------------------------
@@ -739,10 +785,10 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             ? e.Key
             : throw new McpException($"unknown module '{module}'; use one of {string.Join(", ", ChainModules)}");
 
-    /// <summary>The module id whose effect/parameters to edit: AMP is the clone amp (9) while in clone mode.</summary>
-    private int EditTarget(int id) => id == 3 && state.PresetState?.IsCloneMode == true ? 9 : id;
+    /// <summary>The module id whose effect/parameters to edit: AMP is the clone amp while in clone mode.</summary>
+    private int EditTarget(int id) => ModuleIds.EditTarget(id, state.PresetState?.IsCloneMode == true);
 
-    private static int Physical(int id) => id == 9 ? 3 : id;
+    private static int Physical(int id) => ModuleIds.Physical(id);
 
     private static bool ParseSlotKind(string kind) => kind.ToLowerInvariant() switch
     {
@@ -751,7 +797,8 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         _ => throw new McpException("kind must be ir or clone"),
     };
 
-    private static int SlotIndex(int slot) => slot is >= 1 and <= 5 ? slot - 1 : throw new McpException("slot must be 1-5");
+    private static int SlotIndex(int slot) =>
+        slot >= 1 && slot <= ModuleIds.UserSlotCount ? slot - 1 : throw new McpException($"slot must be 1-{ModuleIds.UserSlotCount}");
 
     private static string SlotTitle(int index, bool isClone) => $"{(isClone ? "User Profile" : "User IR")} {index + 1}";
 
@@ -759,9 +806,10 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
 
     private static string Text(JsonElement e) => e.ValueKind == JsonValueKind.String ? e.GetString()!.Trim() : e.GetRawText();
 
+    /// <summary>A finite number (a JSON number or numeric string); NaN and infinities are refused.</summary>
     private static double Number(JsonElement e) =>
-        e.ValueKind == JsonValueKind.Number ? e.GetDouble()
-        : e.ValueKind == JsonValueKind.String && double.TryParse(e.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d
+        e.ValueKind == JsonValueKind.Number && e.GetDouble() is var n && double.IsFinite(n) ? n
+        : e.ValueKind == JsonValueKind.String && double.TryParse(e.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) && double.IsFinite(d) ? d
         : throw new McpException($"expected a number, got {e.GetRawText()}");
 
     private static int Int(JsonElement e, int min, int max) =>
@@ -799,12 +847,17 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     // Plumbing
     // ---------------------------------------------------------------------
 
-    private void RequireConnected()
+    private void RequireStarted()
     {
         if (state.Data is null)
         {
             throw new McpException("PocketCake is still starting up");
         }
+    }
+
+    private void RequireConnected()
+    {
+        RequireStarted();
 
         if (!state.IsConnected)
         {
@@ -812,30 +865,31 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
         }
     }
 
+    /// <summary>Fails fast when an operation holds the gate; the operation itself re-checks atomically.</summary>
     private void RequireIdle()
     {
-        if (state.Data is null)
-        {
-            throw new McpException("PocketCake is still starting up");
-        }
+        RequireStarted();
 
         if (state.IsLoading)
         {
-            throw new McpException("PocketCake is busy with another device operation; retry in a moment");
+            throw new McpException(BusyMessage);
         }
     }
 
-    /// <summary>Runs an <see cref="AppState"/> edit, surfacing the send failure it would only report in the status line.</summary>
-    private async Task Edit(Func<Task> edit)
+    /// <summary>Turns a refused or failed <see cref="AppState"/> operation into a tool error.</summary>
+    private static void Check(OpResult result)
     {
-        var before = state.Status;
-        await edit();
-
-        if (state.Status != before && state.Status?.StartsWith("edit failed", StringComparison.Ordinal) == true)
+        switch (result.Outcome)
         {
-            throw new McpException(state.Status);
+            case OpOutcome.Busy:
+                throw new McpException(BusyMessage);
+            case OpOutcome.Failed:
+                throw new McpException(result.Message ?? "the operation failed");
         }
     }
+
+    /// <summary>Runs an <see cref="AppState"/> edit and surfaces its failure.</summary>
+    private static async Task Edit(Func<Task<OpResult>> edit) => Check(await edit());
 
     /// <summary>An edit the pedal's re-read state doesn't reflect (always the case in demo mode, which replays fixed dumps).</summary>
     private McpException NotApplied(string detail) => new(state.IsDemo
@@ -860,6 +914,27 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
             throw new McpException("the user declined this in PocketCake");
         }
     }
+
+    /// <summary>
+    /// Runs a round-trip / mutating tool on the UI thread, one at a time: a call while another holds
+    /// the tool gate is refused as busy instead of queueing behind it (or behind its confirm dialog).
+    /// </summary>
+    private Task<T> OnUiExclusive<T>(Func<Task<T>> body) => OnUi(async () =>
+    {
+        if (!await _toolGate.WaitAsync(0))
+        {
+            throw new McpException("PocketCake is busy with another agent request; retry in a moment");
+        }
+
+        try
+        {
+            return await body();
+        }
+        finally
+        {
+            _toolGate.Release();
+        }
+    });
 
     /// <summary>Runs <paramref name="body"/> on the UI thread, where <see cref="AppState"/> lives.</summary>
     private Task<T> OnUi<T>(Func<Task<T>> body)

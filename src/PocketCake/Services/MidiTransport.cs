@@ -7,8 +7,8 @@ using Windows.Devices.Midi;
 namespace PocketCake.Services;
 
 /// <summary>
-/// USB-MIDI transport over the WinRT MIDI API. Opens the input and output ports whose names
-/// contain the target substring; inbound SysEx is already F0-led.
+/// USB-MIDI transport over the WinRT MIDI API. Opens the input and output ports named exactly
+/// like the target, else the first whose names contain it; inbound SysEx is already F0-led.
 /// </summary>
 public sealed class MidiTransport : ITransport
 {
@@ -24,8 +24,6 @@ public sealed class MidiTransport : ITransport
         add { }
         remove { }
     }
-
-    public bool HasConnectionEvents => false;
 
     /// <summary>USB-MIDI devices from the OS MIDI stack, merged by name across directions.</summary>
     public static async Task<List<UsbMidiDevice>> EnumerateAsync()
@@ -71,13 +69,13 @@ public sealed class MidiTransport : ITransport
     {
         await DisconnectAsync();
 
-        var needle = (target ?? DefaultTarget).ToLowerInvariant();
+        var name = target ?? DefaultTarget;
 
         var ins = await DeviceInformation.FindAllAsync(MidiInPort.GetDeviceSelector());
         var outs = await DeviceInformation.FindAllAsync(MidiOutPort.GetDeviceSelector());
 
-        var inInfo = ins.FirstOrDefault(d => d.Name.ToLowerInvariant().Contains(needle));
-        var outInfo = outs.FirstOrDefault(d => d.Name.ToLowerInvariant().Contains(needle));
+        var inInfo = FindPort(ins, name);
+        var outInfo = FindPort(outs, name);
 
         if (inInfo is null || outInfo is null)
         {
@@ -98,6 +96,11 @@ public sealed class MidiTransport : ITransport
         _in = inPort;
         _out = outPort;
     }
+
+    /// <summary>The port named exactly <paramref name="name"/>, else the first whose name contains it.</summary>
+    private static DeviceInformation? FindPort(IReadOnlyList<DeviceInformation> ports, string name) =>
+        ports.FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.OrdinalIgnoreCase))
+        ?? ports.FirstOrDefault(d => d.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
 
     private void OnMessage(MidiInPort sender, MidiMessageReceivedEventArgs args)
     {

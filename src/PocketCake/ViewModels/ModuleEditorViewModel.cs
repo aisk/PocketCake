@@ -16,8 +16,8 @@ public sealed class ModuleEditorViewModel(AppState state) : ObservableObject
 
     private int ModuleId => state.SelectedModule;
 
-    /// <summary>The physical module: the clone amp (9) lives in the AMP slot (3).</summary>
-    private int PhysicalId => ModuleId == 9 ? 3 : ModuleId;
+    /// <summary>The physical module: the clone amp lives in the AMP slot.</summary>
+    private int PhysicalId => ModuleIds.Physical(ModuleId);
 
     /// <summary>The physical module's name ("AMP" for the clone amp too), for its icon and colour.</summary>
     public string ModuleName => state.Data?.Modules.NameOf(PhysicalId) ?? $"M{ModuleId}";
@@ -28,7 +28,7 @@ public sealed class ModuleEditorViewModel(AppState state) : ObservableObject
 
     public bool HasEffect => _definition is not null;
 
-    public string Title => ModuleId == 9 ? "AMP · Clone" : ModuleName;
+    public string Title => ModuleId == ModuleIds.CloneAmp ? "AMP · Clone" : ModuleName;
 
     public IReadOnlyList<string> EffectNames => _effectNames;
 
@@ -84,7 +84,7 @@ public sealed class ModuleEditorViewModel(AppState state) : ObservableObject
         }
     }
 
-    public bool IsAmp => PhysicalId == 3;
+    public bool IsAmp => PhysicalId == ModuleIds.Amp;
 
     public bool IsCloneMode
     {
@@ -101,8 +101,8 @@ public sealed class ModuleEditorViewModel(AppState state) : ObservableObject
     /// <summary>The User-IR / User-Profile slot the current effect plays from, if any.</summary>
     public (int Index, bool IsClone)? Slot => (ModuleId, EffectId) switch
     {
-        (4, >= 416 and <= 420) => (EffectId.Value - 416, false),
-        (9, >= 901 and <= 905) => (EffectId.Value - 901, true),
+        (4, >= ModuleIds.UserIrBase and < ModuleIds.UserIrBase + ModuleIds.UserSlotCount) => (EffectId.Value - ModuleIds.UserIrBase, false),
+        (ModuleIds.CloneAmp, >= ModuleIds.UserProfileBase and < ModuleIds.UserProfileBase + ModuleIds.UserSlotCount) => (EffectId.Value - ModuleIds.UserProfileBase, true),
         _ => null,
     };
 

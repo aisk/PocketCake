@@ -193,8 +193,6 @@ public static class CloUploadFrame
     private const int NameOffset = 10;
     private const int DataOffset = NameOffset + 64;
 
-    public static readonly string CommitFrame = SysexChunkUpload.Frame(1, 0, [0x12, 0x24]);
-
     public static byte[] BuildBlob(int slot, string name, CloProfile profile)
     {
         var clo = CloCodec.Encode(profile, CloCodec.UploadArrayBTaps);
@@ -514,5 +512,27 @@ public static class NamFormat
 
         return text.Contains("invalid .nam") || text.Contains("unsupported activation") || text.Contains("gated") ||
                text.Contains("not supported") || text.Contains("missing");
+    }
+}
+
+/// <summary>Checks a User IR (<c>.wav</c>) or User Profile (<c>.nam</c>) file before it is read.</summary>
+public static class SlotUploadFile
+{
+    /// <summary>A generous cap that only blocks huge reads; real WAV IRs and <c>.nam</c> files are a few MB.</summary>
+    public const long MaxBytes = 32L * 1024 * 1024;
+
+    public static string Extension(bool isClone) => isClone ? ".nam" : ".wav";
+
+    /// <summary>Why the file at <paramref name="path"/> (<paramref name="length"/> bytes) can't go into the slot, or null.</summary>
+    public static string? Problem(string path, long length, bool isClone)
+    {
+        var extension = Extension(isClone);
+
+        if (!string.Equals(Path.GetExtension(path), extension, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"expected a {extension} file";
+        }
+
+        return length > MaxBytes ? $"the file is too large ({length / (1024 * 1024)} MB; the limit is {MaxBytes / (1024 * 1024)} MB)" : null;
     }
 }

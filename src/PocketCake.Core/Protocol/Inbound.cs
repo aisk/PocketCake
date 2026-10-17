@@ -44,10 +44,29 @@ public sealed record DataFrame(string Hex) : InboundMessage;
 /// <summary>A frame that lacks the expected SysEx framing.</summary>
 public sealed record MalformedFrame(string Hex) : InboundMessage;
 
-/// <summary>Buffers and reassembles multi-packet USB SysEx responses.</summary>
-public sealed class MultiPacketReassembler
+/// <summary>
+/// Buffers and reassembles multi-packet USB SysEx responses. Packets carry no response id, only
+/// <c>total</c> and <c>current</c>, so a partial set is keyed by <c>total</c> and started over
+/// whenever a packet 0 arrives or a slot fills twice. This assumes in-order delivery (link layer
+/// is ordered); if packets were reordered a response may be dropped and, rarely, spliced (no worse
+/// than before). A partial set also expires <see cref="IdleTimeout"/> after its last packet.
+/// </summary>
+public sealed class MultiPacketReassembler(TimeProvider? timeProvider = null)
 {
-    private readonly Dictionary<string, Dictionary<int, byte[]>> _responses = [];
+    public static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(2);
+
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly Dictionary<string, Partial> _responses = [];
+
+    private sealed class Partial
+    {
+        public Dictionary<int, byte[]> Packets { get; } = [];
+
+        public long LastPacketAt { get; set; }
+    }
+
+    /// <summary>Drops every partial response (e.g. on reconnect).</summary>
+    public void Reset() => _responses.Clear();
 
     /// <summary>
     /// Feeds one F0-started SysEx packet. Returns the reassembled <c>8080F0…F7</c> frame hex
@@ -64,15 +83,27 @@ public sealed class MultiPacketReassembler
             return "8080" + Hex.Of(p);
         }
 
-        var id = $"{p[3]}_{p[4]}";
-
-        if (!_responses.TryGetValue(id, out var packets))
+        if (current >= total)
         {
-            packets = [];
-            _responses[id] = packets;
+            return null;
         }
 
-        packets[current] = p;
+        var now = _time.GetTimestamp();
+        ExpireIdle(now);
+
+        var id = $"{p[3]}_{p[4]}";
+
+        // A packet 0, or a slot that is already filled, means a new response: drop the stale set.
+        if (!_responses.TryGetValue(id, out var partial) || current == 0 || partial.Packets.ContainsKey(current))
+        {
+            partial = new Partial();
+            _responses[id] = partial;
+        }
+
+        partial.Packets[current] = p;
+        partial.LastPacketAt = now;
+
+        var packets = partial.Packets;
 
         for (var i = 0; i < total; i++)
         {
@@ -99,6 +130,17 @@ public sealed class MultiPacketReassembler
 
         return Hex.Of(frame.ToArray());
     }
+
+    private void ExpireIdle(long now)
+    {
+        foreach (var (id, partial) in _responses)
+        {
+            if (_time.GetElapsedTime(partial.LastPacketAt, now) >= IdleTimeout)
+            {
+                _responses.Remove(id);
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -107,9 +149,12 @@ public sealed class MultiPacketReassembler
 /// noise: anything that isn't a plausible SysEx packet is skipped, and a packet that
 /// trips the reassembler is dropped.
 /// </summary>
-public sealed class InboundClassifier
+public sealed class InboundClassifier(TimeProvider? timeProvider = null)
 {
-    private readonly MultiPacketReassembler _reassembler = new();
+    private readonly MultiPacketReassembler _reassembler = new(timeProvider);
+
+    /// <summary>Drops any partially reassembled response.</summary>
+    public void Reset() => _reassembler.Reset();
 
     public InboundMessage? Feed(byte[] message)
     {

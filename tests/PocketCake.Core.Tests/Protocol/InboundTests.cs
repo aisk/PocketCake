@@ -64,16 +64,136 @@ public sealed class MultiPacketReassemblerTests
     }
 
     [Fact]
-    public void MultiPacketReassemblesWhenCompleteOutOfOrder()
+    public void MultiPacketReassemblesInOrder()
     {
         var r = new MultiPacketReassembler();
 
-        Assert.Null(r.AddPacket(Packet(2, 1, 0x22, 0x22)));
+        Assert.Null(r.AddPacket(Packet(2, 0, 0x11, 0x11)));
 
-        var done = r.AddPacket(Packet(2, 0, 0x11, 0x11));
+        var done = r.AddPacket(Packet(2, 1, 0x22, 0x22));
 
         Assert.NotNull(done);
         Assert.Contains("11112222", done[..^2]);
+    }
+
+    [Fact]
+    public void ReorderedResponseIsDroppedWithoutThrowing()
+    {
+        var r = new MultiPacketReassembler();
+
+        // In-order delivery is assumed: a late packet 0 starts a new response.
+        Assert.Null(r.AddPacket(Packet(2, 1, 0x22, 0x22)));
+        Assert.Null(r.AddPacket(Packet(2, 0, 0x11, 0x11)));
+    }
+
+    [Fact]
+    public void LostMiddlePacketDoesNotSpliceIntoTheNextResponse()
+    {
+        var r = new MultiPacketReassembler();
+
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xA0)));
+        Assert.Null(r.AddPacket(Packet(3, 2, 0xA2))); // A1 lost
+
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xB0)));
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xB1)));
+
+        var b = r.AddPacket(Packet(3, 2, 0xB2));
+
+        Assert.NotNull(b);
+        Assert.Contains("B0B1B2", b);
+        Assert.DoesNotContain("A2", b);
+    }
+
+    [Fact]
+    public void LostFirstPacketDoesNotSpliceAndTheNextResponseDecodes()
+    {
+        var r = new MultiPacketReassembler();
+
+        Assert.Null(r.AddPacket(Packet(2, 1, 0xA1))); // A0 lost
+
+        // B0 starts over, so A1 is never paired with it; B1 then fills a fresh slot.
+        Assert.Null(r.AddPacket(Packet(2, 0, 0xB0)));
+        var b = r.AddPacket(Packet(2, 1, 0xB1));
+
+        Assert.NotNull(b);
+        Assert.Contains("B0B1", b);
+        Assert.DoesNotContain("A1", b);
+
+        Assert.Null(r.AddPacket(Packet(2, 0, 0xC0)));
+        var c = r.AddPacket(Packet(2, 1, 0xC1));
+
+        Assert.NotNull(c);
+        Assert.Contains("C0C1", c);
+    }
+
+    [Fact]
+    public void DuplicateIndexStartsOver()
+    {
+        var r = new MultiPacketReassembler();
+
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xA0)));
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xA1)));
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xB1))); // slot 1 again: the A set is stale
+        Assert.Null(r.AddPacket(Packet(3, 2, 0xB2))); // still missing packet 0
+
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xC0)));
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xC1)));
+        var c = r.AddPacket(Packet(3, 2, 0xC2));
+
+        Assert.NotNull(c);
+        Assert.Contains("C0C1C2", c);
+    }
+
+    [Fact]
+    public void PacketIndexAtOrBeyondTotalIsDropped()
+    {
+        var r = new MultiPacketReassembler();
+
+        Assert.Null(r.AddPacket(Packet(2, 0, 0xA0)));
+        Assert.Null(r.AddPacket(Packet(2, 2, 0xEE)));
+        Assert.Null(r.AddPacket(Packet(2, 5, 0xEE)));
+
+        var a = r.AddPacket(Packet(2, 1, 0xA1));
+
+        Assert.NotNull(a);
+        Assert.Contains("A0A1", a);
+        Assert.DoesNotContain("EE", a);
+    }
+
+    [Fact]
+    public void PartialResponseExpiresAfterIdleTimeout()
+    {
+        var time = new ManualTimeProvider();
+        var r = new MultiPacketReassembler(time);
+
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xA0)));
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xA1)));
+
+        // Measured from the last packet: 1.5 s after A1 the set is still alive.
+        time.Advance(TimeSpan.FromSeconds(1.5));
+        Assert.NotNull(r.AddPacket(Packet(3, 2, 0xA2)));
+
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xB1)));
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xB0))); // starts over (in-order assumption)
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xB1)));
+        time.Advance(MultiPacketReassembler.IdleTimeout);
+
+        // B expired: its last packet completes nothing.
+        Assert.Null(r.AddPacket(Packet(3, 2, 0xB2)));
+    }
+
+    [Fact]
+    public void ResetDropsPartialResponses()
+    {
+        var r = new MultiPacketReassembler();
+
+        Assert.Null(r.AddPacket(Packet(3, 0, 0xA0)));
+        Assert.Null(r.AddPacket(Packet(3, 1, 0xA1)));
+
+        r.Reset();
+
+        Assert.Null(r.AddPacket(Packet(3, 2, 0xA2)));
     }
 
     [Fact]
@@ -106,4 +226,16 @@ public sealed class MultiPacketReassemblerTests
         Assert.Contains("B0B1B2", b);
         Assert.DoesNotContain("A0", b);
     }
+}
+
+/// <summary>A clock the test advances by hand.</summary>
+internal sealed class ManualTimeProvider : TimeProvider
+{
+    private long _ticks;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => _ticks;
+
+    public void Advance(TimeSpan by) => _ticks += by.Ticks;
 }

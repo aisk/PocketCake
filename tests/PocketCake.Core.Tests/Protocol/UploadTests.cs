@@ -99,7 +99,7 @@ public sealed class CloUploadFrameTests
     [Fact]
     public void CommitTrailerReproducesCapturedFrame()
     {
-        Assert.Equal(Assert.Single(GoldenList("clone_upload_golden.json", "trailer")), Usb(CloUploadFrame.CommitFrame));
+        Assert.Equal(Assert.Single(GoldenList("clone_upload_golden.json", "trailer")), Usb(SysexChunkUpload.Frame(1, 0, [0x12, 0x24])));
     }
 
     [Fact]
@@ -361,5 +361,47 @@ public sealed class NamFormatTests
         Assert.True(NamFormat.LooksLikeFormatError(new Exception("unsupported activation `Swish`")));
         Assert.True(NamFormat.LooksLikeFormatError(new Exception("gated WaveNet not supported")));
         Assert.False(NamFormat.LooksLikeFormatError(new Exception("connection reset")));
+    }
+}
+
+public sealed class SysexChunkUploadTests
+{
+    [Fact]
+    public void AcceptsUpTo255Chunks()
+    {
+        Assert.Equal(255, SysexChunkUpload.BuildChunks(new byte[255 * SysexChunkUpload.ChunkPayloadBytes]).Count);
+    }
+
+    [Fact]
+    public void RejectsMoreThan255Chunks()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => SysexChunkUpload.BuildChunks(new byte[255 * SysexChunkUpload.ChunkPayloadBytes + 1]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => SysexChunkUpload.Frame(256, 0, [0x00]));
+    }
+}
+
+public sealed class SlotUploadFileTests
+{
+    [Fact]
+    public void AcceptsTheSlotsExtensionAnyCase()
+    {
+        Assert.Null(SlotUploadFile.Problem(@"C:\irs\cab.wav", 50_000, isClone: false));
+        Assert.Null(SlotUploadFile.Problem(@"C:\irs\CAB.WAV", 50_000, isClone: false));
+        Assert.Null(SlotUploadFile.Problem(@"C:\nam\amp.nam", 4_000_000, isClone: true));
+    }
+
+    [Fact]
+    public void RejectsTheWrongExtension()
+    {
+        Assert.NotNull(SlotUploadFile.Problem(@"C:\nam\amp.nam", 1000, isClone: false));
+        Assert.NotNull(SlotUploadFile.Problem(@"C:\irs\cab.wav", 1000, isClone: true));
+        Assert.NotNull(SlotUploadFile.Problem(@"C:\Windows\System32\config\SAM", 1000, isClone: true));
+    }
+
+    [Fact]
+    public void RejectsHugeFiles()
+    {
+        Assert.Null(SlotUploadFile.Problem("big.wav", SlotUploadFile.MaxBytes, isClone: false));
+        Assert.NotNull(SlotUploadFile.Problem("big.wav", SlotUploadFile.MaxBytes + 1, isClone: false));
     }
 }

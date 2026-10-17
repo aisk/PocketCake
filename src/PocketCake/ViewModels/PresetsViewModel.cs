@@ -190,7 +190,7 @@ public sealed class PresetsViewModel : ObservableObject
 
             foreach (var tile in Chain[i].Modules)
             {
-                var editId = tile.SlotId == 3 && st.IsCloneMode ? 9 : tile.SlotId;
+                var editId = tile.SlotId is { } slotId ? ModuleIds.EditTarget(slotId, st.IsCloneMode) : (int?)null;
                 tile.EditId = editId;
                 tile.EffectName = editId is { } id && _state.SelectedEffects.TryGetValue(id, out var fx) ? _state.EffectDisplayName(fx) : "—";
                 tile.SyncIsOn(st.ModuleStates.GetValueOrDefault(tile.Name));

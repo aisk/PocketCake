@@ -279,3 +279,28 @@ public sealed class PresetJsonTests
         Assert.Equal(90, imp.PresetBpm);
     }
 }
+
+public sealed class ModuleIdsTests
+{
+    [Fact]
+    public void AmpIsEditedAsTheCloneAmpOnlyInCloneMode()
+    {
+        Assert.Equal(ModuleIds.CloneAmp, ModuleIds.EditTarget(ModuleIds.Amp, isCloneMode: true));
+        Assert.Equal(ModuleIds.Amp, ModuleIds.EditTarget(ModuleIds.Amp, isCloneMode: false));
+        Assert.Equal(4, ModuleIds.EditTarget(4, isCloneMode: true));
+    }
+
+    [Fact]
+    public void CloneAmpLivesInTheAmpSlot()
+    {
+        Assert.Equal(ModuleIds.Amp, ModuleIds.Physical(ModuleIds.CloneAmp));
+        Assert.Equal(7, ModuleIds.Physical(7));
+    }
+
+    [Fact]
+    public void UserSlotBases()
+    {
+        Assert.Equal(416, ModuleIds.UserSlotBase(isClone: false));
+        Assert.Equal(901, ModuleIds.UserSlotBase(isClone: true));
+    }
+}

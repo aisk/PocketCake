@@ -25,13 +25,14 @@ endpoint on `http://127.0.0.1:47821/mcp` (loopback only; the port can be changed
 editor, and you watch the edits happen live. Saving a preset and writing User IR / clone slots still pop a
 confirmation in the app; factory reset is never exposed.
 
-```powershell
-claude mcp add --transport http pocketcake http://127.0.0.1:47821/mcp
-```
+Every request must carry a bearer token. To register PocketCake with Claude Code, copy the setup command from
+**Settings → Agent control** (**Copy setup command**) and run it; **Reset token** issues a new token, after
+which agents must be set up again with the new command.
 
 The server sends [`skills/pocketcake/SKILL.md`](skills/pocketcake/SKILL.md) to the agent as its instructions
 and offers it as the `pocketcake_guide` prompt. For Claude Code you can also install it as a skill by copying
-that folder into `~/.claude/skills/`. Clients that only speak stdio can bridge with `npx mcp-remote <url>`.
+that folder into `~/.claude/skills/`. Clients that only speak stdio can bridge with `npx mcp-remote <url>`
+(it must also pass the token header).
 
 ## Acknowledgements
 

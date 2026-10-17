@@ -77,7 +77,7 @@ public sealed partial class PresetsView : Page
                 "The current preset has edits that are not saved to a slot. Loading a preset will discard them.",
                 "Discard"))
         {
-            await State.LoadPresetAsync(item.Preset);
+            Dialogs.ReportIfBusy(await State.LoadPresetAsync(item.Preset));
         }
 
         // The list selects on click; put it back on the preset actually loaded.
@@ -103,7 +103,7 @@ public sealed partial class PresetsView : Page
 
         try
         {
-            await State.ImportPresetAsync(await File.ReadAllTextAsync(path));
+            Dialogs.ReportIfBusy(await State.ImportPresetAsync(await File.ReadAllTextAsync(path)));
         }
         catch (Exception ex)
         {

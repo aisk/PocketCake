@@ -36,11 +36,6 @@
     <EmbeddedResource Include="..\..\skills\pocketcake\SKILL.md" LogicalName="PocketCake.SKILL.md" />
   </ItemGroup>
 
-  <!-- Demo mode replays the real device captures used by the tests. -->
-  <ItemGroup>
-    <Compile Include="..\..\tests\PocketCake.Core.Tests\Captures.cs" Link="Services\Captures.cs" />
-  </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\PocketCake.Core\PocketCake.Core.csproj" />
   </ItemGroup>

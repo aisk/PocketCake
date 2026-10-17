@@ -34,6 +34,15 @@ public static class Dialogs
         Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
     };
 
+    /// <summary>Surfaces a refused (Busy) operation in the status line; the gate itself sets no status.</summary>
+    public static void ReportIfBusy(OpResult result)
+    {
+        if (result.Outcome == OpOutcome.Busy)
+        {
+            State.ReportStatus("busy with another device operation — try again in a moment");
+        }
+    }
+
     public static async Task<bool> ConfirmAsync(XamlRoot root, string title, string message, string confirm)
     {
         var dialog = Create(root, title, Body(message));
@@ -220,7 +229,16 @@ public static class Dialogs
             // Keep the dialog up while the flash write is in flight.
             var deferral = e.GetDeferral();
             dialog.IsPrimaryButtonEnabled = false;
-            await state.SavePresetAsync(slot.SelectedIndex + 1, nameBox.Text.Trim());
+            var result = await state.SavePresetAsync(slot.SelectedIndex + 1, nameBox.Text.Trim());
+
+            if (result.Outcome == OpOutcome.Busy)
+            {
+                // Nothing was sent: keep the dialog and its input so the user can retry.
+                ReportIfBusy(result);
+                e.Cancel = true;
+                dialog.IsPrimaryButtonEnabled = nameBox.Text.Trim().Length > 0;
+            }
+
             deferral.Complete();
         };
 
@@ -271,15 +289,28 @@ public static class Dialogs
     {
         var state = State;
 
-        if (state.IsLoading || await MainWindow.Instance.PickFileAsync(isClone ? ".nam" : ".wav") is not { } path)
+        if (state.IsLoading || await MainWindow.Instance.PickFileAsync(SlotUploadFile.Extension(isClone)) is not { } path)
         {
             return;
         }
 
-        Func<Task> upload;
+        // Something else may have started while the picker was open.
+        if (state.IsLoading)
+        {
+            ReportIfBusy(OpResult.Busy);
+            return;
+        }
+
+        Func<Task<OpResult>> upload;
 
         try
         {
+            if (SlotUploadFile.Problem(path, new FileInfo(path).Length, isClone) is { } problem)
+            {
+                await ShowErrorAsync("Couldn't read the file", $"{Path.GetFileName(path)}: {problem}.");
+                return;
+            }
+
             if (isClone)
             {
                 var namJson = await File.ReadAllTextAsync(path);
@@ -309,7 +340,7 @@ public static class Dialogs
 
         try
         {
-            await upload();
+            ReportIfBusy(await upload());
         }
         catch (ImportException e)
         {
@@ -334,7 +365,7 @@ public static class Dialogs
         {
             Header = "Name",
             MaxLength = max,
-            Text = state.EffectDisplayName((isClone ? 901 : 416) + slot),
+            Text = state.EffectDisplayName(ModuleIds.UserSlotBase(isClone) + slot),
             Width = 320,
         };
 
@@ -349,7 +380,7 @@ public static class Dialogs
         }
 
         var name = box.Text.Trim();
-        await (isClone ? state.RenameCloneSlotAsync(slot, name) : state.RenameIrSlotAsync(slot, name));
+        ReportIfBusy(await (isClone ? state.RenameCloneSlotAsync(slot, name) : state.RenameIrSlotAsync(slot, name)));
     }
 
     public static async Task ClearSlotAsync(int slot, bool isClone)
@@ -358,7 +389,7 @@ public static class Dialogs
 
         if (await ConfirmAsync(Root, $"Clear {SlotTitle(slot, isClone)}?", detail, "Clear"))
         {
-            await (isClone ? State.ClearCloneSlotAsync(slot) : State.ClearIrSlotAsync(slot));
+            ReportIfBusy(await (isClone ? State.ClearCloneSlotAsync(slot) : State.ClearIrSlotAsync(slot)));
         }
     }
 }

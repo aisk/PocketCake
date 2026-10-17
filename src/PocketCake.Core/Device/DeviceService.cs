@@ -23,9 +23,6 @@ public interface ITransport : IAsyncDisposable
     /// <summary>Connection-state changes (true = connected), for transports that have them (BLE).</summary>
     event Action<bool>? ConnectionChanged;
 
-    /// <summary>Whether <see cref="ConnectionChanged"/> is ever raised.</summary>
-    bool HasConnectionEvents { get; }
-
     Task ConnectAsync(string? target, CancellationToken ct = default);
 
     /// <summary>Puts a stored <c>8080F0…F7</c> command on the wire in this transport's framing.</summary>
@@ -66,16 +63,17 @@ public sealed class DeviceService : IAsyncDisposable
     private const string CloneCommitSig = "0102010B0003";
 
     private readonly ITransport _transport;
-    private readonly InboundClassifier _classifier = new();
+    private readonly InboundClassifier _classifier;
     private readonly object _classifierLock = new();
 
     // Serializes DataFrame-reading round-trips: the inbound stream carries no correlation id,
     // so two overlapping reads could each complete on whichever dump arrives first.
     private readonly SemaphoreSlim _ioGate = new(1, 1);
 
-    public DeviceService(ITransport transport)
+    public DeviceService(ITransport transport, TimeProvider? timeProvider = null)
     {
         _transport = transport;
+        _classifier = new InboundClassifier(timeProvider);
         _transport.PacketReceived += OnPacket;
         _transport.ConnectionChanged += c => ConnectionChanged?.Invoke(c);
     }
@@ -87,8 +85,6 @@ public sealed class DeviceService : IAsyncDisposable
     public event Action<string, byte[]>? Traffic;
 
     public event Action<bool>? ConnectionChanged;
-
-    public bool HasConnectionEvents => _transport.HasConnectionEvents;
 
     private void OnPacket(byte[] packet)
     {
@@ -107,7 +103,16 @@ public sealed class DeviceService : IAsyncDisposable
         }
     }
 
-    public Task ConnectAsync(string? target, CancellationToken ct = default) => _transport.ConnectAsync(target, ct);
+    /// <summary>Opens the transport, first dropping any half-reassembled response from a previous link.</summary>
+    public Task ConnectAsync(string? target, CancellationToken ct = default)
+    {
+        lock (_classifierLock)
+        {
+            _classifier.Reset();
+        }
+
+        return _transport.ConnectAsync(target, ct);
+    }
 
     public Task DisconnectAsync() => _transport.DisconnectAsync();
 
@@ -179,11 +184,25 @@ public sealed class DeviceService : IAsyncDisposable
         }
     }
 
-    private Task<string?> RequestDataFrameAsync(string requestHex, TimeSpan timeout) => SerializedAsync(() =>
-        AwaitFirstAsync(() => SendFrameAsync(requestHex), m => (m as DataFrame)?.Hex, timeout));
+    /// <summary>
+    /// Whether <paramref name="replyHex"/> answers <paramref name="requestHex"/>: every captured reply
+    /// echoes the request's command bytes at hex chars 22–30 (e.g. <c>01020401</c> for the state dump).
+    /// </summary>
+    public static bool ReplyMatches(string requestHex, string replyHex) =>
+        requestHex.Length >= 30 && replyHex.Length >= 30 &&
+        requestHex.AsSpan(22, 8).Equals(replyHex.AsSpan(22, 8), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Session-init (<c>020300</c>) the official tool sends first; required for IR flash commits.</summary>
-    public Task<string?> EnterEditSessionAsync() => RequestDataFrameAsync(SessionInitRequest, TimeSpan.FromSeconds(1));
+    private Task<string?> RequestDataFrameAsync(string requestHex, TimeSpan timeout, bool correlate = true) => SerializedAsync(() =>
+        AwaitFirstAsync(
+            () => SendFrameAsync(requestHex),
+            m => m is DataFrame d && (!correlate || ReplyMatches(requestHex, d.Hex)) ? d.Hex : null,
+            timeout));
+
+    /// <summary>
+    /// Session-init (<c>020300</c>) the official tool sends first; required for IR flash commits.
+    /// There is no capture of its reply, so any data frame completes it.
+    /// </summary>
+    public Task<string?> EnterEditSessionAsync() => RequestDataFrameAsync(SessionInitRequest, TimeSpan.FromSeconds(1), correlate: false);
 
     /// <summary>Requests the current preset state dump (<c>020401</c>).</summary>
     public Task<string?> RequestStateDumpAsync(TimeSpan? timeout = null) =>
@@ -207,36 +226,52 @@ public sealed class DeviceService : IAsyncDisposable
 
     /// <summary>
     /// Sends each chunk, waiting for its ACK (retransmitting a dropped ACK up to 10 times), then
-    /// waits for the commit notification matching <paramref name="commitSig"/>.
+    /// waits for the commit notification matching <paramref name="commitSig"/>. The commit listener
+    /// is attached before the first chunk so a notification racing the last ACK is not missed.
     /// </summary>
     private Task<WriteResult> WriteChunksAsync(IReadOnlyList<string> chunks, string commitSig, Action<int, int>? onProgress) =>
         SerializedAsync(async () =>
         {
             var ackTimeout = TimeSpan.FromMilliseconds(1200);
+            var commit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            for (var i = 0; i < chunks.Count; i++)
+            void OnCommit(InboundMessage m)
             {
-                var acked = false;
-
-                for (var attempt = 0; attempt < 10 && !acked; attempt++)
+                if (m is DataFrame d && d.Hex.Contains(commitSig, StringComparison.OrdinalIgnoreCase))
                 {
-                    acked = await SendAndAwaitAckAsync(chunks[i], ackTimeout).ConfigureAwait(false);
+                    commit.TrySetResult();
                 }
-
-                if (!acked)
-                {
-                    return WriteResult.NoAck;
-                }
-
-                onProgress?.Invoke(i + 1, chunks.Count);
             }
 
-            var committed = await AwaitFirstAsync(
-                () => Task.CompletedTask,
-                m => m is DataFrame d && d.Hex.Contains(commitSig, StringComparison.OrdinalIgnoreCase) ? m : null,
-                TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            Inbound += OnCommit;
 
-            return committed is not null ? WriteResult.Committed : WriteResult.NotCommitted;
+            try
+            {
+                for (var i = 0; i < chunks.Count; i++)
+                {
+                    var acked = false;
+
+                    for (var attempt = 0; attempt < 10 && !acked; attempt++)
+                    {
+                        acked = await SendAndAwaitAckAsync(chunks[i], ackTimeout).ConfigureAwait(false);
+                    }
+
+                    if (!acked)
+                    {
+                        return WriteResult.NoAck;
+                    }
+
+                    onProgress?.Invoke(i + 1, chunks.Count);
+                }
+
+                var done = await Task.WhenAny(commit.Task, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+
+                return done == commit.Task ? WriteResult.Committed : WriteResult.NotCommitted;
+            }
+            finally
+            {
+                Inbound -= OnCommit;
+            }
         });
 
     public async ValueTask DisposeAsync()

@@ -12,11 +12,9 @@ up in its window as the user watches.
 ## Setup
 
 The tools exist only while PocketCake runs with **Settings → App → Agent control** switched on. If they are
-missing, ask the user to turn it on, then register the endpoint shown there:
-
-```
-claude mcp add --transport http pocketcake http://127.0.0.1:47821/mcp
-```
+missing, ask the user to turn it on, then copy the setup command from Settings → Agent control (**Copy setup
+command**) and run it. The endpoint requires the token that command carries; if calls fail with
+"token required", the token was reset and the setup command must be copied again.
 
 ## The pedal
 
@@ -47,8 +45,10 @@ The pedal holds 50 User presets (P01–P50, writable) and 50 Factory presets (F0
    `set_preset_settings`. `list_effects` shows what a module can run (`details: true` adds descriptions and
    parameter ranges). Changing an effect resets that module's parameters, so set the effect first, then
    its parameters.
-4. Edits are live sound only. `save_preset` stores them; `load_preset` discards unsaved edits, so finish
-   or save the current work before loading another preset.
+4. Edits are live sound only. `save_preset` stores them; `load_preset` and `import_preset` discard unsaved
+   edits (the user is asked to approve that), so finish or save the current work before loading another
+   preset.
+5. A "busy" error means another device operation or agent call is still running; wait a moment and retry.
 
 ## Values
 

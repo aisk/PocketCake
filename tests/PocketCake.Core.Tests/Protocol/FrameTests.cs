@@ -22,6 +22,14 @@ public sealed class FootswitchFrameTests
     }
 
     [Fact]
+    public void RejectsModulesOutsideTheChain()
+    {
+        Assert.NotNull(FootswitchFrame.Build(8, isFs2: false, isOn: true));
+        Assert.Throws<ArgumentOutOfRangeException>(() => FootswitchFrame.Build(9, isFs2: false, isOn: true));
+        Assert.Throws<ArgumentOutOfRangeException>(() => FootswitchFrame.Build(-1, isFs2: true, isOn: false));
+    }
+
+    [Fact]
     public void StateByteIsLast()
     {
         Assert.EndsWith("070001f7", FootswitchFrame.Build(7, isFs2: true, isOn: true));
@@ -74,13 +82,6 @@ public sealed class GlobalSettingWriterTests
         AssertFrame("8080f0000700010000000a0101010100020004000000000000000000000000f7", GlobalSettingWriter.DumpRecord(0x02, 0x04, 0));
         AssertFrame("8080f00c0b00010000000a0101010100020002000000000000000000000000f7", GlobalSettingWriter.DumpRecord(0x02, 0x02, 0));
         AssertFrame("8080f00c0600010000000a0101010100020002000000000604000000000000f7", GlobalSettingWriter.DumpRecord(0x02, 0x02, 100));
-    }
-
-    [Fact]
-    public void StandaloneBoolModeReamp()
-    {
-        AssertFrame("8080f0060c000100000006010104030000000000000000f7", GlobalSettingWriter.StandaloneBool(0x04, 0x03, 0));
-        AssertFrame("8080f0070a000100000006010104030001000000000000f7", GlobalSettingWriter.StandaloneBool(0x04, 0x03, 1));
     }
 
     [Theory]
@@ -146,5 +147,38 @@ public sealed class SavePresetFrameTests
     {
         Assert.ThrowsAny<ArgumentException>(() => _builder.Build("X", 0));
         Assert.ThrowsAny<ArgumentException>(() => _builder.Build("X", 51));
+    }
+}
+
+public sealed class GlobalSettingRegistersTests
+{
+    [Fact]
+    public void ExpFsTargetRegisterFollowsTheType()
+    {
+        Assert.Equal((0x17, 0x01), GlobalSettingRegisters.ExpFsTarget(0, isFunc2: false));
+        Assert.Equal((0x16, 0x00), GlobalSettingRegisters.ExpFsTarget(1, isFunc2: false));
+        Assert.Equal((0x16, 0x02), GlobalSettingRegisters.ExpFsTarget(2, isFunc2: false));
+        Assert.Equal((0x16, 0x04), GlobalSettingRegisters.ExpFsTarget(2, isFunc2: true));
+    }
+
+    [Fact]
+    public void TargetOptionsFollowTheType()
+    {
+        Assert.Same(GlobalSettingRegisters.ExpTargets, GlobalSettingRegisters.TargetOptions(0));
+        Assert.Same(GlobalSettingRegisters.FsTargets, GlobalSettingRegisters.TargetOptions(1));
+        Assert.Same(GlobalSettingRegisters.FsTargets, GlobalSettingRegisters.TargetOptions(2));
+    }
+
+    [Fact]
+    public void DumpRecordAddressesMatchTheCapturedWrites()
+    {
+        // Same addresses as DumpRecordNewSettingWrites' captured frames.
+        Assert.Equal((0x04, 0x04), GlobalSettingRegisters.DumpRecordAddress["mode"]);
+        Assert.Equal((0x06, 0x04), GlobalSettingRegisters.DumpRecordAddress["reamp"]);
+        Assert.Equal((0x01, 0x05), GlobalSettingRegisters.DumpRecordAddress["expFsType"]);
+        Assert.Equal((0x03, 0x02), GlobalSettingRegisters.DumpRecordAddress["backlight"]);
+        Assert.Equal((0x04, 0x02), GlobalSettingRegisters.DumpRecordAddress["eco"]);
+        Assert.Equal((0x05, 0x02), GlobalSettingRegisters.DumpRecordAddress["powerConfirm"]);
+        Assert.Equal((0x06, 0x02), GlobalSettingRegisters.DumpRecordAddress["battOnly"]);
     }
 }

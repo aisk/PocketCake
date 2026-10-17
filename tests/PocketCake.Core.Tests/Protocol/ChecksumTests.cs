@@ -62,6 +62,15 @@ public sealed class HexCodecTests
     }
 
     [Fact]
+    public void ExpandByteIntRejectsValuesOutsideAByte()
+    {
+        Assert.Equal("0000", HexCodec.ExpandByte(0));
+        Assert.Equal("0F0F", HexCodec.ExpandByte(255));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HexCodec.ExpandByte(256));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HexCodec.ExpandByte(-1));
+    }
+
+    [Fact]
     public void ExpandThenCollapseRoundTrips()
     {
         Assert.Equal("A3", HexCodec.CollapseNibbles(HexCodec.ExpandByte("A3")));

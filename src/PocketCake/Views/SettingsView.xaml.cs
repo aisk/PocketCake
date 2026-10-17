@@ -32,6 +32,16 @@ public sealed partial class SettingsView : Page
         MainWindow.Instance.State.ReportStatus("setup command copied");
     }
 
+    private async void OnResetAgentTokenClick(object sender, RoutedEventArgs e)
+    {
+        if (await Dialogs.ConfirmAsync(XamlRoot, "Reset the agent token?",
+                "Agents set up with the current token lose access until you copy the new setup command into them.", "Reset"))
+        {
+            ViewModel.ResetAgentToken();
+            MainWindow.Instance.State.ReportStatus("agent token reset — copy the setup command again");
+        }
+    }
+
     private async void OnFactoryResetClick(object sender, RoutedEventArgs e)
     {
         if (await Dialogs.ConfirmAsync(XamlRoot, "Reset to factory settings?",

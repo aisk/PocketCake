@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 using PocketCake.Core.Dsp;
+using PocketCake.Core.Protocol;
 using Xunit.Abstractions;
 
 namespace PocketCake.Core.Tests.Dsp;
@@ -132,6 +133,18 @@ public sealed class CloDspTests(ITestOutputHelper output)
 
         Assert.ThrowsAny<OperationCanceledException>(
             () => CloDsp.Generate(RefNam(), CloDsp.LoadReferenceDi(), cts.Token));
+    }
+
+    [Fact]
+    public void ToUploadProfile_CarriesTheOfficialDcBlockBiquad()
+    {
+        var golden = CloCodec.Decode(File.ReadAllBytes(TestData.FixturePath("golden_ref.clo")));
+        var profile = CloDsp.ToUploadProfile(new CloArrays([0.5f], [0.25f], [1, 2, 3, 4]));
+
+        Assert.Equal(golden.Biquad, profile.Biquad);
+        Assert.Equal([0.5], profile.ArrayA);
+        Assert.Equal([0.25], profile.ArrayB);
+        Assert.Equal([1.0, 2, 3, 4], profile.Gains);
     }
 
     [Fact]

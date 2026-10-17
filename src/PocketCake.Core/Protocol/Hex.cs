@@ -149,5 +149,8 @@ public static class HexCodec
         return $"0{b[0]}0{b[1]}";
     }
 
-    public static string ExpandByte(int value) => ExpandByte(value.ToString("X"));
+    public static string ExpandByte(int value) =>
+        value is >= 0 and <= 0xFF
+            ? ExpandByte(value.ToString("X"))
+            : throw new ArgumentOutOfRangeException(nameof(value), value, "must be a byte (0-255)");
 }

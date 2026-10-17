@@ -1,13 +1,15 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using PocketCake.Core.Agent;
 using PocketCake.Core.Model;
 
 namespace PocketCake.Services;
 
-/// <summary>The connection the app should restore on the next launch.</summary>
-public sealed record ConnectionProfile(TransportKind Transport, string? BleName);
+/// <summary>The connection the app should restore on the next launch (<paramref name="Target"/>: the device name, if known).</summary>
+public sealed record ConnectionProfile(TransportKind Transport, string? Target);
 
 /// <summary>
-/// Persists the user's last connection intent, the device-model override and the agent-control switch in
+/// Persists the user's last connection intent, the device-model override and the agent-control switch and token in
 /// <c>%LOCALAPPDATA%\PocketCake\settings.json</c>. Auto-connect is armed by a successful
 /// connect and disarmed by a manual disconnect; an unexpected drop writes nothing.
 /// </summary>
@@ -22,9 +24,15 @@ public sealed class AppSettings
     {
         public bool AutoConnect { get; set; }
         public string? Transport { get; set; }
+        public string? Target { get; set; }
+
+        /// <summary>Pre-<see cref="Target"/> files stored the BLE device name here; read, never written.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? BleName { get; set; }
+
         public string? ModelOverride { get; set; }
         public bool AgentControl { get; set; }
+        public string? AgentToken { get; set; }
         public int? AgentPort { get; set; }
     }
 
@@ -47,7 +55,10 @@ public sealed class AppSettings
         return settings;
     }
 
-    /// <summary>The saved profile iff auto-connect is armed (null for a BLE profile without a name).</summary>
+    /// <summary>
+    /// The saved profile iff auto-connect is armed (null for a BLE profile without a name). A USB profile
+    /// saved before device names were kept has no target; the transport's default device is used.
+    /// </summary>
     public ConnectionProfile? AutoConnectProfile
     {
         get
@@ -57,20 +68,23 @@ public sealed class AppSettings
                 return null;
             }
 
+            var target = !string.IsNullOrEmpty(_data.Target) ? _data.Target : _data.BleName;
+
             return _data.Transport switch
             {
-                "ble" when !string.IsNullOrEmpty(_data.BleName) => new ConnectionProfile(TransportKind.Ble, _data.BleName),
-                "usb" => new ConnectionProfile(TransportKind.Usb, null),
+                "ble" when !string.IsNullOrEmpty(target) => new ConnectionProfile(TransportKind.Ble, target),
+                "usb" => new ConnectionProfile(TransportKind.Usb, string.IsNullOrEmpty(target) ? null : target),
                 _ => null,
             };
         }
     }
 
-    public void SaveProfile(TransportKind transport, string? bleName)
+    public void SaveProfile(TransportKind transport, string? target)
     {
         _data.AutoConnect = true;
         _data.Transport = transport == TransportKind.Ble ? "ble" : "usb";
-        _data.BleName = transport == TransportKind.Ble && !string.IsNullOrEmpty(bleName) ? bleName : null;
+        _data.Target = string.IsNullOrEmpty(target) ? null : target;
+        _data.BleName = null;
         Save();
     }
 
@@ -109,6 +123,27 @@ public sealed class AppSettings
             _data.AgentControl = value;
             Save();
         }
+    }
+
+    /// <summary>The bearer token MCP clients must send, or null until agent control is first enabled.</summary>
+    public string? AgentToken => _data.AgentToken;
+
+    /// <summary>Generates the agent token if there is none yet.</summary>
+    public string EnsureAgentToken()
+    {
+        if (string.IsNullOrEmpty(_data.AgentToken))
+        {
+            ResetAgentToken();
+        }
+
+        return _data.AgentToken!;
+    }
+
+    /// <summary>Replaces the agent token; clients set up with the old one stop working.</summary>
+    public void ResetAgentToken()
+    {
+        _data.AgentToken = AgentAuth.NewToken();
+        Save();
     }
 
     /// <summary>The loopback port the MCP endpoint listens on (settings.json only).</summary>

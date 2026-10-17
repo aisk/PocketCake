@@ -8,6 +8,8 @@
 // the final array outputs. Loop order and accumulation associativity mirror the
 // Dart/Rust so the result tracks the reference element-wise.
 
+using PocketCake.Core.Protocol;
+
 namespace PocketCake.Core.Dsp;
 
 /// <summary>The clone model's FIR arrays + nonlinearity gains, ready for the `.clo`.</summary>
@@ -42,6 +44,12 @@ public static partial class CloDsp
     internal const int RunLen = 1600000;
 
     private static readonly double[] ProbeLevelsArr = [.. FitLevels, LoudLevel];
+
+    /// <summary>The DC-block biquad the official tool writes into every uploaded clone model.</summary>
+    private static readonly double[] UploadBiquad =
+    [
+        0.9963043928146362, -1.9926087856292725, 0.9963043928146362, -1.9925950765609741, 0.9926224946975708,
+    ];
 
     /// <summary>
     /// The full, ordered list of probe levels the WaveNet is run at: the multi-level
@@ -93,6 +101,13 @@ public static partial class CloDsp
     /// </summary>
     public static double[] RunOneProbeLevel(string namJson, ReadOnlySpan<float> referenceDi44100, double level) =>
         RunOneProbeLevel(namJson, referenceDi44100, level, CancellationToken.None);
+
+    /// <summary>Wraps generated arrays in the <c>.clo</c> profile a clone upload carries.</summary>
+    public static CloProfile ToUploadProfile(CloArrays arrays) => new(
+        [.. UploadBiquad],
+        arrays.Gains,
+        arrays.ArrayA.Select(v => (double)v).ToArray(),
+        arrays.ArrayB.Select(v => (double)v).ToArray());
 
     /// <inheritdoc cref="RunOneProbeLevel(string, ReadOnlySpan{float}, double)"/>
     public static double[] RunOneProbeLevel(
