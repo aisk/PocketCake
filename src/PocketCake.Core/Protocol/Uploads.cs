@@ -187,7 +187,8 @@ public static class IrUploadFrame
 /// </summary>
 public static class CloUploadFrame
 {
-    public const int NameMaxChars = 15;
+    // The name field holds 15, but the official app cuts clone names to 10 like every other name.
+    public const int NameMaxChars = 10;
 
     private const byte NameFieldChars = 0x0F;
     private const int NameOffset = 10;
