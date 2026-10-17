@@ -194,6 +194,24 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
+    public async Task UploadResendsAChunkTheDeviceRejects()
+    {
+        var chunks = IrUploadFrame.BuildChunks(IrUploadFrame.BuildClearBlob(2));
+        var transport = new FakeTransport();
+        var service = new DeviceService(transport);
+        var sends = 0;
+        var nack = SysexWriteFrame.Build([0x14, 0x23, 0x01]);
+
+        transport.Responder = _ => ++sends == 1 ? [nack] : [Ack, IrCommit];
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        Assert.Equal(WriteResult.Committed, await service.UploadIrAsync(chunks));
+        Assert.Equal([chunks[0], chunks[0]], transport.Sent);
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1000), "a rejected chunk is resent without waiting out the ACK timeout");
+    }
+
+    [Fact]
     public async Task UploadCommitsWhenTheCommitArrivesTogetherWithTheLastAck()
     {
         var chunks = IrUploadFrame.BuildChunks(IrUploadFrame.BuildRenameBlob(2, "abcde12345"));

@@ -3,10 +3,13 @@ namespace PocketCake.Core.Protocol;
 /// <summary>A classified inbound SysEx frame from the device.</summary>
 public abstract record InboundMessage
 {
-    private const string AckHex = "8080F00B02000100000003010400080000F7";
+    // Replies to `12 45` (is the preset modified?): data 01 = modified, 00 = matches the stored preset.
     private const string ModifiedHex = "8080F0070A000100000003010204050001F7";
     private const string SavedHex = "8080F0070D000100000003010204050000F7";
     private const string TerminatorHex = "8080F0030601050104000200000000F7";
+
+    // Logical layout: crc total seq len | flag cmd data…; the pedal acknowledges writes with flag 0x14.
+    private const int AckFlag = 0x14;
 
     /// <summary>Classifies <paramref name="hex"/> (any case) into a typed message.</summary>
     public static InboundMessage Classify(string hex)
@@ -15,7 +18,6 @@ public abstract record InboundMessage
 
         switch (h)
         {
-            case AckHex: return new AckMessage();
             case ModifiedHex: return new PresetModifiedMessage();
             case SavedHex: return new PresetSavedMessage();
             case TerminatorHex: return new TerminatorMessage();
@@ -23,14 +25,21 @@ public abstract record InboundMessage
 
         if (h.StartsWith("8080F0", StringComparison.Ordinal) && h.EndsWith("F7", StringComparison.Ordinal) && h.Length >= 8)
         {
-            return new DataFrame(h);
+            var b = Hex.Logical(h);
+
+            // ACK data is `<cmd?> <status>`: status 0 = accepted, anything else asks for a resend.
+            return b.Length >= 5 && b[4] == AckFlag ? new AckMessage(b.Length >= 7 ? b[6] : 0) : new DataFrame(h);
         }
 
         return new MalformedFrame(h);
     }
 }
 
-public sealed record AckMessage : InboundMessage;
+/// <summary>The pedal's reply to a write; a non-zero <see cref="Status"/> rejects it (the official app resends).</summary>
+public sealed record AckMessage(int Status = 0) : InboundMessage
+{
+    public bool Accepted => Status == 0;
+}
 
 public sealed record PresetModifiedMessage : InboundMessage;
 

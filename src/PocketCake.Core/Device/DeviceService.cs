@@ -159,15 +159,18 @@ public sealed class DeviceService : IAsyncDisposable
         }
     }
 
-    /// <summary>Sends <paramref name="frameHex"/> and resolves true if the device ACKs before the timeout.</summary>
+    /// <summary>
+    /// Sends <paramref name="frameHex"/> and resolves true if the device accepts it before the timeout;
+    /// a rejecting ACK resolves false at once, so a retry loop resends without waiting out the timeout.
+    /// </summary>
     public async Task<bool> SendAndAwaitAckAsync(string frameHex, TimeSpan? timeout = null)
     {
         var r = await AwaitFirstAsync(
             () => SendFrameAsync(frameHex),
-            m => m is AckMessage ? m : null,
+            m => m as AckMessage,
             timeout ?? TimeSpan.FromMilliseconds(800)).ConfigureAwait(false);
 
-        return r is not null;
+        return r is { Accepted: true };
     }
 
     private async Task<T> SerializedAsync<T>(Func<Task<T>> body)

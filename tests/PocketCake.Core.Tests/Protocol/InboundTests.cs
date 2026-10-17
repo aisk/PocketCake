@@ -14,6 +14,17 @@ public sealed class InboundMessageTests
     }
 
     [Fact]
+    public void AnyFlag14FrameIsAnAckCarryingItsStatus()
+    {
+        var accepted = Assert.IsType<AckMessage>(InboundMessage.Classify(SysexWriteFrame.Build([0x14, 0x47, 0x00])));
+        var rejected = Assert.IsType<AckMessage>(InboundMessage.Classify(SysexWriteFrame.Build([0x14, 0x08, 0x02])));
+
+        Assert.True(accepted.Accepted);
+        Assert.False(rejected.Accepted);
+        Assert.True(Assert.IsType<AckMessage>(InboundMessage.Classify("8080F00B02000100000003010400080000F7")).Accepted);
+    }
+
+    [Fact]
     public void ClassificationIsCaseInsensitive()
     {
         Assert.IsType<AckMessage>(InboundMessage.Classify("8080f00b02000100000003010400080000f7"));
