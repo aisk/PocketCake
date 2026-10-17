@@ -29,7 +29,7 @@ assigned to footswitch FS1 or FS2 (at most three modules per switch).
 | AMP | Amp model; in *clone mode* it plays a User Profile (a converted NAM model) instead |
 | IR | Cabinet impulse response, including 5 User IR slots |
 | EQ | Equalizer |
-| DLY | Delay (Time in ms, or note divisions while its Sync toggle is on) |
+| DLY | Delay (Time in ms, or note divisions while its Sync toggle is on; Smart Box only) |
 | RVB | Reverb |
 
 DRV → AMP → IR → EQ is a fixed block; the other five modules can sit anywhere before or after it.
@@ -56,7 +56,7 @@ The pedal holds 50 User presets (P01–P50, writable) and 50 Factory presets (F0
   accepts; read the returned value to see where it landed.
 - `choice` parameters take one of their `options`; `toggle` parameters take true/false.
 - Turning a Sync toggle on turns that effect's Rate/Time into a `choice` of note divisions; `get_preset`
-  reflects the switch.
+  reflects the switch. The Pocket Master has no Sync or Trail toggles.
 
 ## Flash writes
 

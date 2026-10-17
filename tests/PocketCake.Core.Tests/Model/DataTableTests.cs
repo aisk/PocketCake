@@ -291,6 +291,27 @@ public sealed class EffectLibraryTests
     }
 
     [Fact]
+    public void PocketMasterHidesSyncAndTrail()
+    {
+        // The Pocket Master (QME-10) has no Sync / Trail; their writes land on the effect's first parameter.
+        var pm = TestData.Assets.ForModel(DeviceModel.PocketMaster).Effects;
+        var mag = pm.ById(704)!;
+
+        Assert.Equal(["Mix", "Time", "F.Back"], mag.Params.Select(p => p.Name));
+        Assert.Null(mag.Params.First(p => p.Name == "Time").SyncToggleAlgId);
+        Assert.DoesNotContain(pm.Effects.Values.SelectMany(e => e.Params), p => p.Name is "Sync" or "Trail" || p.SyncToggleAlgId is not null);
+    }
+
+    [Fact]
+    public void SmartBoxKeepsSyncAndTrail()
+    {
+        var mag = TestData.Assets.ForModel(DeviceModel.SmartBox).Effects.ById(704)!;
+
+        Assert.Equal(["Mix", "Time", "F.Back", "Sync", "Trail"], mag.Params.Select(p => p.Name));
+        Assert.Equal(3, mag.Params.First(p => p.Name == "Time").SyncToggleAlgId);
+    }
+
+    [Fact]
     public void EveryEffectParses()
     {
         Assert.True(Lib.Effects.Count > 50);

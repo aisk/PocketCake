@@ -92,7 +92,33 @@ public sealed partial class AppState : INotifyPropertyChanged
     // ---------------------------------------------------------------------
 
     private DataAssets? _data;
-    public DataAssets? Data { get => _data; private set => Set(ref _data, value); }
+    private DataAssets? _modelData;
+    private DeviceModel _modelDataFor;
+
+    /// <summary>The data tables, with the effect library narrowed to <see cref="EffectiveModel"/>.</summary>
+    public DataAssets? Data
+    {
+        get
+        {
+            if (_data is null)
+            {
+                return null;
+            }
+
+            if (_modelData is null || _modelDataFor != EffectiveModel)
+            {
+                _modelDataFor = EffectiveModel;
+                _modelData = _data.ForModel(_modelDataFor);
+            }
+
+            return _modelData;
+        }
+        private set
+        {
+            _modelData = null;
+            Set(ref _data, value);
+        }
+    }
 
     private TransportKind _transportKind = TransportKind.Usb;
     public TransportKind TransportKind { get => _transportKind; private set => Set(ref _transportKind, value); }
@@ -114,6 +140,7 @@ public sealed partial class AppState : INotifyPropertyChanged
             if (Set(ref _detectedModel, value))
             {
                 OnPropertyChanged(nameof(EffectiveModel));
+                OnPropertyChanged(nameof(Data));
             }
         }
     }
@@ -128,6 +155,7 @@ public sealed partial class AppState : INotifyPropertyChanged
             {
                 _settings.ModelOverride = value;
                 OnPropertyChanged(nameof(EffectiveModel));
+                OnPropertyChanged(nameof(Data));
             }
         }
     }

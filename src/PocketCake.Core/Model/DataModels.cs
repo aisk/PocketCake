@@ -294,13 +294,15 @@ public sealed class ParameterTables(
 
 /// <summary>
 /// Per-device effect/amp capability manifest. Holds, per model: connection-name substrings
-/// used to identify it, a display name, and (for subset models) the effect ids per module.
+/// used to identify it, a display name, (for subset models) the effect ids per module, and the
+/// parameter names its firmware lacks.
 /// </summary>
 public sealed class DeviceCapabilities
 {
     private readonly Dictionary<DeviceModel, Dictionary<int, HashSet<int>>> _effects = [];
     private readonly Dictionary<DeviceModel, (List<string> Usb, List<string> Ble)> _matchers = [];
     private readonly Dictionary<DeviceModel, string> _displayNames = [];
+    private readonly Dictionary<DeviceModel, HashSet<string>> _hiddenParams = [];
 
     public static DeviceCapabilities FromJson(JsonElement json)
     {
@@ -332,9 +334,37 @@ public sealed class DeviceCapabilities
                     e => int.Parse(e.Name),
                     e => e.Value.EnumerateArray().Select(x => x.GetInt32()).ToHashSet());
             }
+
+            if (v.TryGetProperty("hiddenParams", out var hidden) && hidden.ValueKind == JsonValueKind.Array)
+            {
+                caps._hiddenParams[m] = hidden.EnumerateArray().Select(x => x.GetString()!).ToHashSet();
+            }
         }
 
         return caps;
+    }
+
+    /// <summary>
+    /// <paramref name="library"/> as <paramref name="model"/> sees it: its hidden parameters dropped, and
+    /// tempo params no longer gated on a dropped Sync toggle.
+    /// </summary>
+    public EffectLibrary EffectsFor(DeviceModel model, EffectLibrary library)
+    {
+        if (!_hiddenParams.TryGetValue(model, out var hidden))
+        {
+            return library;
+        }
+
+        return new EffectLibrary(library.Effects.ToDictionary(e => e.Key, e =>
+        {
+            var hiddenIds = e.Value.Params.Where(p => hidden.Contains(p.Name)).Select(p => p.AlgId).ToHashSet();
+            var ps = e.Value.Params
+                .Where(p => !hiddenIds.Contains(p.AlgId))
+                .Select(p => p.SyncToggleAlgId is { } gate && hiddenIds.Contains(gate) ? p with { SyncToggleAlgId = null } : p)
+                .ToList();
+
+            return e.Value with { Params = ps };
+        }));
     }
 
     /// <summary>Classifies a connected device (by its transport name). Fails open to Unknown.</summary>
@@ -422,4 +452,21 @@ public sealed class DataAssets
     }
 
     public static Task<DataAssets> LoadAsync() => Task.Run(Load);
+
+    /// <summary>These tables with the effect library narrowed to what <paramref name="model"/> supports.</summary>
+    public DataAssets ForModel(DeviceModel model)
+    {
+        var effects = Capabilities.EffectsFor(model, Effects);
+
+        return ReferenceEquals(effects, Effects) ? this : new DataAssets
+        {
+            Effects = effects,
+            Commands = Commands,
+            Modules = Modules,
+            Characters = Characters,
+            Signatures = Signatures,
+            Parameters = Parameters,
+            Capabilities = Capabilities,
+        };
+    }
 }
