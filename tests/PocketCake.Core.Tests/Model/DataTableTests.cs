@@ -150,6 +150,14 @@ public sealed class DeviceCapabilitiesTests
     }
 
     [Fact]
+    public void FirmwarePagePerModel()
+    {
+        Assert.EndsWith("qme-10", Caps.FirmwarePage(DeviceModel.PocketMaster));
+        Assert.EndsWith("qme-20", Caps.FirmwarePage(DeviceModel.SmartBox));
+        Assert.Equal(DeviceCapabilities.DownloadPage, Caps.FirmwarePage(DeviceModel.Unknown));
+    }
+
+    [Fact]
     public void NullOrUnrecognizedFailsOpen()
     {
         Assert.Equal(DeviceModel.Unknown, Caps.Detect(null, TransportKind.Usb));

@@ -107,6 +107,12 @@ public sealed class SettingsViewModel : ObservableObject
     public string DetectedModelText =>
         $"Detected: {(_state.IsConnected ? _state.Data?.Capabilities.DisplayName(_state.DetectedModel) ?? "unknown" : "not connected")}";
 
+    public string FirmwareDescription =>
+        $"Firmware for the {(_state.EffectiveModel == DeviceModel.Unknown ? "pedal" : _state.Data?.Capabilities.DisplayName(_state.EffectiveModel))} is installed with Sonicake's official updater";
+
+    public Uri FirmwarePage =>
+        new(_state.Data?.Capabilities.FirmwarePage(_state.EffectiveModel) ?? DeviceCapabilities.DownloadPage);
+
     private int Target(int? value) => Math.Clamp(value ?? 0, 0, TargetOptions.Count - 1);
 
     private void SetTarget(int value, bool isFunc2)

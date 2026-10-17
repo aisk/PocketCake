@@ -2,6 +2,7 @@
   "models": {
     "pocketMaster": {
       "displayName": "Pocket Master",
+      "firmwarePage": "https://www.sonicake.com/pages/pocket-master-software-firmware-download-qme-10",
       "match": {
         "usb": ["pocket master", "pocket"],
         "ble": ["pocket master ble", "pocket master"]
@@ -17,6 +18,7 @@
     },
     "smartBox": {
       "displayName": "Smart Box",
+      "firmwarePage": "https://www.sonicake.com/pages/smart-box-software-firmware-download-qme-20",
       "match": {
         "usb": ["smart box"],
         "ble": ["smart box ble", "smart box"]

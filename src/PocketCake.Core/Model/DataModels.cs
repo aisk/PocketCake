@@ -303,6 +303,10 @@ public sealed class DeviceCapabilities
     private readonly Dictionary<DeviceModel, (List<string> Usb, List<string> Ble)> _matchers = [];
     private readonly Dictionary<DeviceModel, string> _displayNames = [];
     private readonly Dictionary<DeviceModel, HashSet<string>> _hiddenParams = [];
+    private readonly Dictionary<DeviceModel, string> _firmwarePages = [];
+
+    /// <summary>Sonicake's download page listing every firmware release.</summary>
+    public const string DownloadPage = "https://www.sonicake.com/pages/download";
 
     public static DeviceCapabilities FromJson(JsonElement json)
     {
@@ -326,6 +330,11 @@ public sealed class DeviceCapabilities
             var match = v.GetProperty("match");
 
             caps._displayNames[m] = v.GetProperty("displayName").GetString()!;
+
+            if (v.TryGetProperty("firmwarePage", out var page) && page.ValueKind == JsonValueKind.String)
+            {
+                caps._firmwarePages[m] = page.GetString()!;
+            }
             caps._matchers[m] = (Lower(match.GetProperty("usb")), Lower(match.GetProperty("ble")));
 
             if (v.TryGetProperty("effects", out var eff) && eff.ValueKind == JsonValueKind.Object)
@@ -397,6 +406,9 @@ public sealed class DeviceCapabilities
             DeviceModel.SmartBox => "Smart Box",
             _ => "Unknown device",
         };
+
+    /// <summary>The page offering <paramref name="model"/>'s firmware and Sonicake's updater, or the general download page.</summary>
+    public string FirmwarePage(DeviceModel model) => _firmwarePages.GetValueOrDefault(model) ?? DownloadPage;
 
     /// <summary>The effect ids <paramref name="model"/> can select in <paramref name="moduleId"/>.</summary>
     public List<int> AvailableEffectIds(CommandLibrary commands, DeviceModel model, int moduleId)

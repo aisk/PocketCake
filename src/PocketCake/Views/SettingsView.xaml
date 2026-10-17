@@ -152,6 +152,9 @@
                         <x:String>Smart Box</x:String>
                     </ComboBox>
                 </local:SettingsRow>
+                <local:SettingsRow Description="{x:Bind ViewModel.FirmwareDescription, Mode=OneWay}" Glyph="&#xE896;" Header="Firmware updates">
+                    <HyperlinkButton Content="Download page" NavigateUri="{x:Bind ViewModel.FirmwarePage, Mode=OneWay}" />
+                </local:SettingsRow>
                 <local:SettingsRow Description="{x:Bind ViewModel.AgentDescription, Mode=OneWay}" Glyph="&#xE99A;" Header="Agent control (MCP)">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button
