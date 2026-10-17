@@ -173,6 +173,9 @@
                 <local:SettingsRow Description="Native editor for Sonicake Pocket Master and Smart Box" Glyph="&#xE946;" Header="About">
                     <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Version}" />
                 </local:SettingsRow>
+                <local:SettingsRow Description="PocketCake is free; a coffee keeps it going" Glyph="&#xEB51;" Header="Support PocketCake">
+                    <HyperlinkButton Content="Buy me a coffee" NavigateUri="https://buymeacoffee.com/asaka" />
+                </local:SettingsRow>
             </StackPanel>
         </Grid>
     </ScrollViewer>
