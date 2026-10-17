@@ -20,8 +20,9 @@ public sealed record CloArrays(float[] ArrayA, float[] ArrayB, double[] Gains);
 /// NAM (.nam WaveNet) to Sonicake `.clo` clone-model generator. The pedal's clone model is a
 /// fixed Wiener-Hammerstein chain (128-tap pre-FIR, asymmetric exponential saturator, 2048-tap
 /// post-FIR at 44.1 kHz); this probes the WaveNet with the reference DI at several levels and
-/// fits that chain to the responses. It is a deterministic approximation: multi-stage gain and
-/// time-dependent behaviour (sag, compression) of the NAM model are not reproduced.
+/// fits that chain to the responses. The pedal's model has a single saturator and no memory
+/// beyond its filters, so multi-stage gain and time-dependent behaviour (sag, compression) of the
+/// NAM model can't be represented on the device; the fit is the closest match within that model.
 /// </summary>
 public static partial class CloDsp
 {
