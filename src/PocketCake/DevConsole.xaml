@@ -1,6 +1,226 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<!-- The UI is built in code; this file registers the page with the XAML type system so Frame can navigate to it. -->
 <Page
     x:Class="PocketCake.DevConsole"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:PocketCake">
+
+    <Page.Resources>
+        <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
+    </Page.Resources>
+
+    <Grid Padding="24,12,24,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Developer console" />
+            <TextBlock
+                Margin="0,4,0,0"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Watch protocol traffic and send raw frames to the pedal. Debug builds only."
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Send -->
+        <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox
+                    x:Name="FrameBox"
+                    FontFamily="{StaticResource MonoFont}"
+                    KeyDown="OnFrameKeyDown"
+                    PlaceholderText="8080F0 … F7">
+                    <TextBox.Header>
+                        <!-- The box is monospace; keep the header in the UI font. -->
+                        <TextBlock FontFamily="{ThemeResource ContentControlThemeFontFamily}" Text="Raw frame (hex)" />
+                    </TextBox.Header>
+                </TextBox>
+                <Button
+                    Grid.Column="1"
+                    VerticalAlignment="Bottom"
+                    Click="OnSendClick"
+                    Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="14" Glyph="&#xE724;" />
+                        <TextBlock Text="Send" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    Grid.Column="2"
+                    VerticalAlignment="Bottom"
+                    Click="OnQueryClick"
+                    ToolTipService.ToolTip="Send a read-only query for the global settings">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="14" Glyph="&#xE713;" />
+                        <TextBlock Text="Query global settings" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- Log toolbar -->
+        <Grid Grid.Row="2" Margin="0,8,0,0" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Log" />
+                <TextBlock
+                    x:Name="CountText"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="0 entries" />
+            </StackPanel>
+            <StackPanel
+                Grid.Column="1"
+                Margin="16,0,0,0"
+                Orientation="Horizontal"
+                Spacing="8">
+                <TextBox
+                    x:Name="MarkerBox"
+                    Width="180"
+                    VerticalAlignment="Center"
+                    KeyDown="OnMarkerKeyDown"
+                    PlaceholderText="Marker label" />
+                <Button VerticalAlignment="Center" Click="OnMarkClick" ToolTipService.ToolTip="Insert a marker into the log">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="14" Glyph="&#xE7C1;" />
+                        <TextBlock Text="Mark" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <CommandBar
+                Grid.Column="2"
+                Background="Transparent"
+                DefaultLabelPosition="Right"
+                OverflowButtonVisibility="Collapsed">
+                <AppBarToggleButton
+                    x:Name="RawToggle"
+                    Label="Raw RX/TX"
+                    ToolTipService.ToolTip="Also show every raw MIDI packet">
+                    <AppBarToggleButton.Icon>
+                        <FontIcon Glyph="&#xE8AB;" />
+                    </AppBarToggleButton.Icon>
+                </AppBarToggleButton>
+                <AppBarToggleButton
+                    x:Name="CaptureToggle"
+                    Click="OnCaptureClick"
+                    Label="Capture"
+                    ToolTipService.ToolTip="Append everything to midi-capture.log">
+                    <AppBarToggleButton.Icon>
+                        <FontIcon Glyph="&#xE74E;" />
+                    </AppBarToggleButton.Icon>
+                </AppBarToggleButton>
+                <AppBarSeparator />
+                <AppBarButton
+                    x:Name="CopyButton"
+                    Click="OnCopyClick"
+                    Icon="Copy"
+                    IsEnabled="False"
+                    Label="Copy">
+                    <AppBarButton.KeyboardAccelerators>
+                        <KeyboardAccelerator
+                            Key="C"
+                            Modifiers="Control"
+                            ScopeOwner="{x:Bind LogList}" />
+                    </AppBarButton.KeyboardAccelerators>
+                </AppBarButton>
+                <AppBarButton Click="OnClearClick" Label="Clear">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE894;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+            </CommandBar>
+        </Grid>
+
+        <!-- Log -->
+        <Border
+            Grid.Row="3"
+            Padding="0,4"
+            Style="{StaticResource CardStyle}">
+            <Grid>
+                <ListView
+                    x:Name="LogList"
+                    ItemsSource="{x:Bind Log}"
+                    SelectionChanged="OnLogSelectionChanged"
+                    SelectionMode="Extended">
+                    <ListView.ItemContainerStyle>
+                        <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="ListViewItem">
+                            <Setter Property="MinHeight" Value="32" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:LogEntry">
+                            <Grid Padding="0,5" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    FontFamily="{StaticResource MonoFont}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{x:Bind TimeText}" />
+                                <Border
+                                    Grid.Column="1"
+                                    Padding="6,0,6,1"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Top"
+                                    Background="{x:Bind Tint}"
+                                    CornerRadius="4">
+                                    <TextBlock
+                                        FontSize="11"
+                                        FontWeight="SemiBold"
+                                        Foreground="{x:Bind Brush}"
+                                        Text="{x:Bind Kind}" />
+                                </Border>
+                                <TextBlock
+                                    Grid.Column="2"
+                                    HorizontalAlignment="Right"
+                                    FontFamily="{StaticResource MonoFont}"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind SizeText}" />
+                                <TextBlock
+                                    Grid.Column="3"
+                                    FontFamily="{StaticResource MonoFont}"
+                                    FontSize="12"
+                                    MaxLines="3"
+                                    Text="{x:Bind Text}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="Wrap" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <StackPanel
+                    x:Name="EmptyState"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsHitTestVisible="False"
+                    Spacing="8">
+                    <FontIcon
+                        FontSize="32"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Glyph="&#xE756;" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="No traffic yet"
+                        TextAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>
