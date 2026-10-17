@@ -120,7 +120,7 @@
                         <local:SettingsRow Glyph="&#xE706;" Header="Backlight">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Slider
-                                    Maximum="10"
+                                    Maximum="100"
                                     Minimum="0"
                                     Style="{StaticResource RowSliderStyle}"
                                     Value="{x:Bind ViewModel.Backlight, Mode=TwoWay}" />

@@ -457,7 +457,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
     [McpServerTool(Name = "set_global_setting")]
     [Description(
         "Sets one device-wide setting: masterVolume (0-100); inputLevel, fxRecLevel, btRecLevel, monitorLevel (dB); usbMode (dry/wet); " +
-        "reamp, eco, powerConfirm, battOnly (true/false); backlight (0-10); expFsType (exp/single/dual); expFsTarget, expFsTarget2 " +
+        "reamp, eco, powerConfirm, battOnly (true/false); backlight (0-100); expFsType (exp/single/dual); expFsTarget, expFsTarget2 " +
         "(a target name from get_global_settings' targetOptions).")]
     public Task<Dictionary<string, object>> SetGlobalSetting(string name, JsonElement value) => OnUiExclusive(async () =>
     {
@@ -481,7 +481,7 @@ public sealed class AgentTools(AppState state, DispatcherQueue dispatcher)
                 await Edit(() => state.SetGlobalSettingAsync(name, Bool(value) ? 1 : 0));
                 break;
             case "backlight":
-                await Edit(() => state.SetGlobalSettingAsync(name, Int(value, 0, 10)));
+                await Edit(() => state.SetGlobalSettingAsync(name, Int(value, 0, 100)));
                 break;
             case "expFsType":
                 await Edit(() => state.SetGlobalSettingAsync(name, Choice(value, ExpFsTypes)));
