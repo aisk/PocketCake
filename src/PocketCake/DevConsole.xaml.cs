@@ -26,6 +26,7 @@ public sealed partial class DevConsole : Page
 
     public DevConsole()
     {
+        InitializeComponent();
         NavigationCacheMode = NavigationCacheMode.Required;
         var state = _state = MainWindow.Instance.State;
 

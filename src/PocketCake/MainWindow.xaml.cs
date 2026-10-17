@@ -190,7 +190,7 @@ public sealed partial class MainWindow : Window
 #if DEBUG
     /// <summary>
     /// Debug hook for headless UI checks: POCKETCAKE_DEMO_PRESET (P01…) loads a preset,
-    /// POCKETCAKE_DEMO_MODULE selects a module, POCKETCAKE_DEMO_PAGE (slots / settings) picks
+    /// POCKETCAKE_DEMO_MODULE selects a module, POCKETCAKE_DEMO_PAGE (slots / settings / console) picks
     /// the page, POCKETCAKE_THEME=dark forces the dark theme, and POCKETCAKE_SNAPSHOT=&lt;png&gt;
     /// renders the window to a file and exits.
     /// </summary>
@@ -219,6 +219,9 @@ public sealed partial class MainWindow : Window
                 break;
             case "settings":
                 Nav.SelectedItem = Nav.SettingsItem;
+                break;
+            case "console":
+                Nav.SelectedItem = ConsoleItem;
                 break;
         }
 
