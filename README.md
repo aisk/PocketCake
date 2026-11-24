@@ -44,13 +44,27 @@ pedal's USB-MIDI and BLE protocol. PocketCake ports that work to C# with its own
 
 ## Build & run
 
-Requires the .NET 10 SDK on Windows 10 1904x or later. The app is unpackaged and self-contained
-on the Windows App SDK.
+Releases ship only through the [Microsoft Store](https://apps.microsoft.com/detail/9P21RKGF9CSZ) as a
+packaged (MSIX) app. For development the app builds unpackaged and self-contained on the Windows App SDK,
+so it runs straight from `dotnet run`. Requires the .NET 10 SDK on Windows 10 1904x or later.
 
 ```powershell
 dotnet test tests/PocketCake.Core.Tests
 dotnet run --project src/PocketCake -p:Platform=x64
 ```
+
+### Microsoft Store package
+
+The Store build packages the app as MSIX with the identity in `src/PocketCake/Package.appxmanifest`
+and writes an unsigned `AppPackages/PocketCake_<version>_x64.msixupload` for Partner Center (the Store signs it).
+Bump `Version` in the manifest for every submission.
+
+```powershell
+dotnet publish src/PocketCake -c Release -p:Platform=x64 -p:StorePackage=true
+```
+
+The tile and logo images in `src/PocketCake/Assets/Store` come from
+`python tools/make-store-assets.py <icon>_1024.png`, using the 1024 px icon from `tools/make-icon.py`.
 
 | Path | |
 | --- | --- |
@@ -58,6 +72,7 @@ dotnet run --project src/PocketCake -p:Platform=x64
 | `src/PocketCake` | The WinUI 3 app: MIDI / BLE transports, app state, view models and views. |
 | `tests/PocketCake.Core.Tests` | xUnit tests, including DSP parity tests against SonicMaster goldens. |
 | `tools/make-icon.py` | Draws the app icon (`python tools/make-icon.py <prefix>`, needs Pillow). |
+| `tools/make-store-assets.py` | Renders the MSIX tile and logo images from the 1024 px icon. |
 
 **Try demo** (shown while no pedal is connected) replays real device captures as a virtual Smart Box, so
 the editor can be explored without hardware; `POCKETCAKE_DEMO=1` starts in demo mode. Debug builds also
