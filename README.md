@@ -5,6 +5,10 @@ multi-effects pedals, built with **WinUI 3** and a Fluent (Mica) interface.
 
 ![PocketCake](screenshot.png)
 
+## Install
+
+Get PocketCake from the [Microsoft Store](https://apps.microsoft.com/detail/9P21RKGF9CSZ).
+
 ## Features
 
 * Real-time, two-way editing over **USB-MIDI** or **Bluetooth LE MIDI** (with auto-reconnect)
